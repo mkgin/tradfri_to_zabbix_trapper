@@ -1,0 +1,14 @@
+# short name and type dict according to 'application_type'
+#
+# Haven't used any more exotic Tradfri devices... will add more
+# as they are encounterd, tested or suggested
+#
+0:
+  name: 'TRADFRI remote control'
+  type: 'remote'
+2:
+  name: 'TRADFRI bulb'
+  type: 'bulb'
+4:
+  name: 'TRADFRI motion sensor'
+  type: 'motion'
