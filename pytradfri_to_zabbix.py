@@ -191,14 +191,14 @@ def main():
         #
         if device_discovery:
             if config['do_zabbix_send']:
-                zabbix_discovery_send( devid = dev.id,
-                                       devtype = app_type_dict[dev.application_type],
+                zabbix_tradfri_discovery_send( devid = dev.id,
+                                       devtype = app_type_dict[dev.application_type]['type'],
                                        dev_name = dev.name,
                                        created_at = int (datetime.timestamp(dev.created_at)),
                                        zahost = zabbix_config, monhost=monitored_hostname)
             if config['print_zabbix_send']:
                 print(f'device_discovery:\nzabbix_discovery_send( devid = {dev.id},')
-                print(f'    devtype = {app_type_dict[dev.application_type]},')
+                print(f'    devtype = ' + app_type_dict[dev.application_type]['type'] + ',')
                 print(f'    dev_name = {dev.name},')
                 print(f'    created_at = {int (datetime.timestamp(dev.created_at))},')
                 print(f'    zahost = {zabbix_config}')
