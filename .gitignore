@@ -2,3 +2,4 @@
 own_config.yml
 __pycache__/
 .#*
+tradfri_standalone_psk.conf
