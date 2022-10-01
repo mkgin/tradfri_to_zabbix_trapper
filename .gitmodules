@@ -1,0 +1,3 @@
+[submodule "api_polling"]
+	path = api_polling
+	url = git@github.com:mkgin/api_polling.git
