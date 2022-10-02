@@ -11,6 +11,20 @@
 - `own_config.yml` overwrites the defaults in config if present.
 - can use the same psk file from pytradfri examples. (`tradfri_standalone_psk.conf`)
 
+## Zabbix
+
+### Zabbix Templates
+
+* Template_Tradfri_Devices.xml 
+  * this template is for discovered devices
+  
+* Template_Tradfri_Gateway.xml  TODO!
+  * contains discovery rule
+  * device list (used to discover new devices)
+  * items to monitor from the gateway
+  
+  
+
 ## modules used
 
 * pytradfri https://github.com/home-assistant-libs/pytradfri
@@ -18,11 +32,13 @@
 * pyzabbix https://github.com/adubkov/py-zabbix
 * yaml https://github.com/yaml/pyyaml
 
+* api_polling (as submodule ) 
+  * Use ```git clone --recurse-submodules``` to clone this repo and the api_polling submodule
+
 ## Todo:
 
 - use my api polling module for sending stategies, polling intervals
 - gateway items
-- zabbix template
-- low level discovery
-- test new PSK from Gateway secret
-- check gateway items
+- get groups, put group name into devices data/inventory
+- zabbix template (Devices done, Gateway TODO)
+- test making a new PSK from Gateway secret
