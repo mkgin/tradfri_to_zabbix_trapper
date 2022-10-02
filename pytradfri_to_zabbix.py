@@ -10,6 +10,7 @@ import socket #for errors from ZabbixSender
 import logging #ZabbixSender
 from pyzabbix import ZabbixMetric, ZabbixSender, ZabbixResponse
 
+
 import os
 from datetime import datetime
 
@@ -19,6 +20,12 @@ from datetime import datetime
 import sys
 folder = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath("%s/.." % folder))
+
+#own libs
+sys.path.append('api_polling')
+from api_poll_config import *
+from api_poll_zabbix import *
+
 
 import json
 import time
@@ -40,82 +47,6 @@ zabbix_server_failed = 0    # Zabbix server did not accept (wrong key, wrong typ
 zabbix_server_total = 0     #
 zabbix_send_failed_time = 0
 
-def send_zabbix_packet(zabbix_packet , zabbix_sender_setting):
-    """Sends zabbix packet to server(s)"""
-    sending_status = False
-    zasender = ZabbixSender(zabbix_sender_setting)
-    global epoch_time, zabbix_server_processed, zabbix_server_failed, zabbix_server_total
-    try:
-        zaserver_response = zasender.send(zabbix_packet)
-        zabbix_packet = [] #it's sent now ok to erase
-        zabbix_send_failed_time = 0 #in case it failed earlier
-        zabbix_server_processed += zaserver_response.processed
-        zabbix_server_failed += zaserver_response.failed
-        zabbix_server_total += zaserver_response.total
-        logging.debug(f'Zabbix Sender succeeded\n{zaserver_response}')
-        sending_status = True
-    except (socket.timeout, socket.error, ConnectionRefusedError ) as error_msg:
-        logging.warning('Zabbix Sender Failed to send some or all: {0}'.format(error_msg))
-        # if sending fails, Zabbix server may be restarting or rebooting.
-        # maybe it gets sent after the next polling attempt.
-        # if zabbix_packet is more than x items or if failure time
-        # greater than x save to disk
-        if zabbix_send_failed_time == 0 : #first fail (after successful send or save)
-            zabbix_send_failed_time = epoch_time
-            # could set defaults for failed item sending timeout and count.
-        if  ( epoch_time - zabbix_send_failed_time > zabbix_send_failed_time_max #900
-            or len(zabbix_packet) > zabbix_send_failed_items_max #500
-            ):
-            logging.error(f'Zabbix Sender failed {epoch_time-zabbix_send_failed_time} seconds ago')
-            logging.error(f'{len(zabbix_packet)} items pending.\nWill try to dump them to disk')
-            save_zabbix_packet_to_disk(zabbix_packet)
-            zabbix_send_failed_time = epoch_time
-            zabbix_packet = [] #it's saved now ok to erase
-            # clear keys from lastchanged so fresh values are collected to be sent next time
-            lastchanged={}
-    except:
-        logging.error(f'Unexpected error: {sys.exc_info()[0]}')
-        raise
-    return sending_status,zaserver_response 
-
-
-def load_config():
-    """Loads the YAML config first from config.yml, then own_config.yml"""
-    # basic config
-    # api config
-    config = {}
-    current_path = os.getcwd()
-    # should really just loop through config files.
-    # and maybe allow one to be specified as an argument
-    configfile_default = f'{current_path}/config.yml'
-    configfile_own = f'{current_path}/own_config.yml'
-    print( current_path,configfile_default, configfile_own)
-    if os.path.isfile(configfile_default):
-        config = yaml.safe_load(open(configfile_default))
-    else:
-        logging.warning(f'Missing:  {configfile_default}' )
-    if os.path.isfile(configfile_own):
-        config.update(yaml.safe_load(open(configfile_own)))
-    else:
-        logging.warning('Missing: {configfile_own}' )
-    return config
-
-def zabbix_send_result_string( result ):
-    return 'zabbix_send_result[' \
-                    f'processed: {result.processed} , ' \
-                    f'failed: {result.failed} , ' \
-                    f'total: {result.total}]'
-
-def zabbix_tradfri_discovery_send( devid, devtype, dev_name, created_at,  zahost, monhost):
-    """Send discovery data to zabbix
-    """
-    # TODO check devid valid...
-    key = f'tradfri.device.discovery.{devtype}'
-    value = f'{devid}_{created_at} {dev_name}'
-    timestamp = int(time.time())
-    zapacket = [ZabbixMetric( monhost, f'{key}', value, timestamp)]
-    pprint.pp(zapacket)
-    return send_zabbix_packet(zapacket , zahost)
 
 def main():
     """main."""
