@@ -79,3 +79,14 @@ Traceback (most recent call last):
     raise RequestTimeout() from None
 pytradfri.error.RequestTimeout
 ```
+
+- again... maybe 2-3 hours and gateway crashes. in this case one of the motion sensors had a blinking red light.
+- maybe the sensor having a low battery and acting funny kept the gw busy with zigbee stuff?
+- battery was at 34%
+- needed to connect my phone app to it again, but the psk for this program was ok.
+
+```
+  File "/home/username/.local/lib/python3.9/site-packages/pytradfri/gateway.py", line 297, in __init__
+    self.raw = GatewayInfoResponse(**raw)
+TypeError: pytradfri.gateway.GatewayInfoResponse() argument after ** must be a mapping, not NoneType
+```

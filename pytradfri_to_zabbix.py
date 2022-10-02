@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.normpath("%s/.." % folder))
 sys.path.append('api_polling')
 from api_poll_config import *
 from api_poll_zabbix import *
-
+from api_poll_tools import *
 
 import json
 import time
@@ -34,7 +34,7 @@ import yaml
 
 from pytradfri import Gateway
 from pytradfri.api.libcoap_api import APIFactory
-from pytradfri.error import PytradfriError
+from pytradfri.error import PytradfriError,RequestTimeout
 from pytradfri.util import load_json, save_json
 
 import pprint
@@ -50,6 +50,7 @@ zabbix_send_failed_time = 0
 
 def main():
     """main."""
+    logging.basicConfig(level=logging.INFO)
     config = load_config()
     monitored_hostname=config['monitored_hostname']
     # variables for zabbix
@@ -88,22 +89,20 @@ def main():
         epoch_timestamp = int(time.time())
 
         # get device endpoints
-        devices_command = gateway.get_devices()
-        print('** devices_command')
-        pprint.pp( devices_command)
-        # 
-        devices_commands = api(devices_command)
-        print('** devices_commands')
-        pprint.pp(devices_commands)
+        devices_command = gateway.get_devices() #try
+
+        logging.debug('** devices_command' , devices_command)
+
+        #devices_commands = api(devices_command) #try:
+        devices_commands = try_n_times( api, devices_command,expected_exceptions=RequestTimeout )
+        logging.debug('** devices_commands', devices_commands)
         # device data
-        devices = api(devices_commands)
+        #devices = api(devices_commands) #try:
+        devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) #try:
         #
-        print('** devices')
-        pprint.pp(devices)
+        logging.debug('** devices', devices)
         
-        lights = [dev for dev in devices if dev.has_light_control]
-        
-        print("*** START dev.raw")
+        logging.debug("*** START dev.raw")
         key_prefix = 'tradfri'
         device_item_list = ['name','ota_update_state',
                        'application_type', 'last_seen', 'reachable']
@@ -140,26 +139,24 @@ def main():
                                     'tradfri.device.list',
                                     device_discovery_item , epoch_timestamp)] #int (datetime.timestamp(dev.created_at)))] #epoch_timestamp)]
                 if config['print_zabbix_send']:
-                    pprint.pp(za_device_send)
+                    logging.info( f'za_device_send {za_device_send}')
                 if config['do_zabbix_send']:
                     zabbix_send_result = send_zabbix_packet(za_device_send, zabbix_config)
                     if config['print_zabbix_send']:
-                        print (zabbix_send_result_string(zabbix_send_result[1]))
+                        logging.info(zabbix_send_result_string(zabbix_send_result[1]))
             if True: #send_device_values:
                 ivlist=[] # send separately per device
                 devtype = app_type_dict[dev.application_type]['type'] #TODO: not used probably
-                print('****')
-                print( type(dev.raw) , type(dev) )
+                logging.debug('****', type(dev.raw) , type(dev) )
                 for k in dev.raw: #device_item_list:
                     if list_all_items:
-                        print( k )
+                        logging.debug( k )
                     if k[0] in device_item_list and k[1] is not None:
                         ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.{k[0]}{key_end}', k[1], epoch_timestamp)]
-                #print( dev.device_info.raw , type(dev.device_info.raw) )
                 for k in dev.device_info.raw:
                     if list_all_items:
-                        print (k)
+                        logging.debug (k)
                     if k[0] in device_info_item_list and k[1] is not None:
                         ivlist += [ZabbixMetric( tradfri_hostname,
                                 f'{key_begin}.device_info.{k[0]}{key_end}',
@@ -167,41 +164,42 @@ def main():
                 if dev.light_control is not None:
                     for k in dev.light_control.raw[0]:
                         if list_all_items:
-                            print(k[0], k[1],type(k),)
+                            logging.debug(k[0], k[1],type(k),)
                         if k[0] in device_light_item_list and k[1] is not None:
                             ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.light_control.{k[0]}{key_end}',
                                     k[1],epoch_timestamp)]            
                 if config['print_zabbix_send']:
-                    print('*** zabbix ivlist:')
+                    logging.info('*** zabbix ivlist:')
                     pprint.pp(ivlist)
                 if config['do_zabbix_send']:
                     zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
                     if config['print_zabbix_send']:
-                        print('*** zabbix server returned:')
-                        print(f'zabbix_send_result: {zabbix_send_result[0]} , ' \
+                        logging.info('*** zabbix server returned:')
+                        logging.info(f'zabbix_send_result: {zabbix_send_result[0]} , ' \
                         f'processed: {zabbix_send_result[1].processed} , ' \
                         f'failed: {zabbix_send_result[1].failed} , ' \
                         f'total: {zabbix_send_result[1].total}')
-        print("*** END dev.raw")
+        logging.debug("*** END dev.raw")
 
         # TODO: check if lamps are in a group.
         # put group names to inventory
 
-        print('** gateway info')
+        logging.debug('** gateway info')
         gateway_item_list = ['ota_update_state','firmware_version','first_setup',
                              'ota_type:','update_progress']
         pprint.pp(api(gateway.get_gateway_info()).raw)
-        print('** gateway endpoint')
+        logging.debug('** gateway endpoint')
         #print_gateway_endpoints(api, gateway)
         #print_gateway(api, gateway)
-        gw_endpoints = api(gateway.get_endpoints())
+        #gw_endpoints = api(gateway.get_endpoints())
         #for gw_endpoint in gw_endpoints:
         #    pprint.pp(gw_endpoint)
         
         if config['do_it_once']:
             break
         else:
+            logging.info('sleeping')
             time.sleep(60)
     #end while
 main()
