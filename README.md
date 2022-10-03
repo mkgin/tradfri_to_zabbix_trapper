@@ -18,12 +18,10 @@
 * Template_Tradfri_Devices.xml 
   * this template is for discovered devices
   
-* Template_Tradfri_Gateway.xml  TODO!
-  * contains discovery rule
+* Template_Tradfri_Gateway.xml
+  * contains device discovery rule
   * device list (used to discover new devices)
   * items to monitor from the gateway
-  
-  
 
 ## modules used
 

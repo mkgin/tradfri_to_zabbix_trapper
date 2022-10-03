@@ -61,44 +61,56 @@ def main():
     # load dict for application_type
     app_type_dict = yaml.safe_load(open('application_type.yml'))
 
-    # loop starts here
-    while True: #breaks at end for single run
-        # load the the tradfri config, check we are have credentials to connect
+    # load the the tradfri config, check we are have credentials to connect
+    try:
+        identity = tradfri_gw_psk[monitored_hostname].get("identity")
+        psk = tradfri_gw_psk[monitored_hostname].get("key")
+        api_factory = APIFactory(host=monitored_hostname, psk_id=identity, psk=psk)
+    except KeyError:
+        identity = uuid.uuid4().hex
+        api_factory = APIFactory(host=monitored_hostname, psk_id=identity)
+
         try:
-            identity = tradfri_gw_psk[monitored_hostname].get("identity")
-            psk = tradfri_gw_psk[monitored_hostname].get("key")
-            api_factory = APIFactory(host=monitored_hostname, psk_id=identity, psk=psk)
-        except KeyError:
-            identity = uuid.uuid4().hex
-            api_factory = APIFactory(host=monitored_hostname, psk_id=identity)
+            psk = api_factory.generate_psk(config['tradfri_security_code'])
+            print("Generated PSK: ", psk)
 
-            try:
-                psk = api_factory.generate_psk(config['tradfri_security_code'])
-                print("Generated PSK: ", psk)
+            tradfri_gw_psk[args.host] = {"identity": identity, "key": psk}
+            save_json(CONFIG_FILE, tradfri_gw_psk)
+        except AttributeError:
+            raise PytradfriError(
+                "Maybe you need to add the 'Security Code' on the "
+                "back of your Tradfri gateway to own_config.yml"
+            )
+    first_loop = True
+    epoch_timestamp_last = int(time.time())
+    sleep_between_api_calls = 1
 
-                tradfri_gw_psk[args.host] = {"identity": identity, "key": psk}
-                save_json(CONFIG_FILE, tradfri_gw_psk)
-            except AttributeError:
-                raise PytradfriError(
-                    "Maybe you need to add the 'Security Code' on the "
-                    "back of your Tradfri gateway to own_config.yml"
-                )
-
+    # loop starts here
+    while True: #breaks at end for single run    
+        # do this less often
+        epoch_timestamp = int(time.time())
         api = api_factory.request
         gateway = Gateway()
-        epoch_timestamp = int(time.time())
+        if first_loop or test_times_straddle_minute(epoch_timestamp_last, epoch_timestamp ,[0,15,30,45]):
+            logging.info(f'Checking Devices {epoch_timestamp} first_loop: {first_loop}')
+            first_loop = False
+            
+            # get device endpoints
+            devices_command = gateway.get_devices() #try
+            # try sleeping 
 
-        # get device endpoints
-        devices_command = gateway.get_devices() #try
+            logging.debug('** devices_command' , devices_command)
 
-        logging.debug('** devices_command' , devices_command)
-
-        #devices_commands = api(devices_command) #try:
-        devices_commands = try_n_times( api, devices_command,expected_exceptions=RequestTimeout )
-        logging.debug('** devices_commands', devices_commands)
+            #devices_commands = api(devices_command) #try:
+            devices_commands = try_n_times( api, devices_command,expected_exceptions=RequestTimeout )
+            # try sleeping
+            logging.debug('** devices_commands', devices_commands)
+            
         # device data
         #devices = api(devices_commands) #try:
-        devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) #try:
+        # TODO: test would this fail if devices changed.
+        devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) 
+        
         #
         logging.debug('** devices', devices)
         
@@ -176,26 +188,33 @@ def main():
                     zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
                     if config['print_zabbix_send']:
                         logging.info('*** zabbix server returned:')
-                        logging.info(f'zabbix_send_result: {zabbix_send_result[0]} , ' \
-                        f'processed: {zabbix_send_result[1].processed} , ' \
-                        f'failed: {zabbix_send_result[1].failed} , ' \
-                        f'total: {zabbix_send_result[1].total}')
+                        logging.info(zabbix_send_result_string(zabbix_send_result[1]))
         logging.debug("*** END dev.raw")
 
-        # TODO: check if lamps are in a group.
+        # TODO: check if devices are in a group.
         # put group names to inventory
+        # use group in visible name
 
         logging.debug('** gateway info')
         gateway_item_list = ['ota_update_state','firmware_version','first_setup',
-                             'ota_type:','update_progress']
-        pprint.pp(api(gateway.get_gateway_info()).raw)
+                             'ota_type','update_progress']
         logging.debug('** gateway endpoint')
-        #print_gateway_endpoints(api, gateway)
-        #print_gateway(api, gateway)
-        #gw_endpoints = api(gateway.get_endpoints())
-        #for gw_endpoint in gw_endpoints:
-        #    pprint.pp(gw_endpoint)
-        
+        gateway_data = api(gateway.get_gateway_info()).raw
+        #pprint.pp(gateway_data)
+        ivlist=[]
+        for k in gateway_data:
+            if k[0] in gateway_item_list:
+                ivlist += [ZabbixMetric( config['monitored_hostname'],
+                        f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
+        if config['print_zabbix_send']:
+            logging.info('*** zabbix ivlist [gateway]:')
+            pprint.pp(ivlist)     
+        if config['do_zabbix_send']:
+            zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
+            if config['print_zabbix_send']:
+                logging.info('*** zabbix server returned:')
+                logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+        epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
             break
         else:

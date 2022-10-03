@@ -90,3 +90,6 @@ pytradfri.error.RequestTimeout
     self.raw = GatewayInfoResponse(**raw)
 TypeError: pytradfri.gateway.GatewayInfoResponse() argument after ** must be a mapping, not NoneType
 ```
+
+- Possibly to do with DHCP?
+  - https://github.com/home-assistant-libs/pytradfri/issues/310
