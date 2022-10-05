@@ -51,6 +51,7 @@ zabbix_send_failed_time = 0
 def main():
     """main."""
     logging.basicConfig(level=logging.INFO)
+    #logging.basicConfig(level=logging.DEBUG)
     config = load_config()
     monitored_hostname=config['monitored_hostname']
     # variables for zabbix
@@ -83,7 +84,7 @@ def main():
             )
     first_loop = True
     epoch_timestamp_last = int(time.time())
-    sleep_between_api_calls = 1
+    sleep_between_api_calls = 2
 
     # loop starts here
     while True: #breaks at end for single run    
@@ -91,28 +92,64 @@ def main():
         epoch_timestamp = int(time.time())
         api = api_factory.request
         gateway = Gateway()
+        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
+
+        # first_time  and occasionally run 
         if first_loop or test_times_straddle_minute(epoch_timestamp_last, epoch_timestamp ,[0,15,30,45]):
             logging.info(f'Checking Devices {epoch_timestamp} first_loop: {first_loop}')
             first_loop = False
             
             # get device endpoints
             devices_command = gateway.get_devices() #try
-            # try sleeping 
+            time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
 
-            logging.debug('** devices_command' , devices_command)
+            logging.debug(f'** devices_command: { devices_command}')
 
             #devices_commands = api(devices_command) #try:
             devices_commands = try_n_times( api, devices_command,expected_exceptions=RequestTimeout )
+            time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
             # try sleeping
-            logging.debug('** devices_commands', devices_commands)
-            
+            logging.debug(f'** devices_commands { devices_commands}')
+
+            # Create dictionary for device group names and ids
+            """ get group name  or id from a device with this dictionary
+                eg: device_group_dict['65582']['name']
+                    device_group_dict['65582']['groupid'])
+            """
+            group_item_list = ['id','name','group_members']
+            device_group_dict = {}
+            #time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
+            groups = api(gateway.get_groups())
+            time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
+            for group in groups:
+                groupname=''
+                groupid=''
+                groupdevs=''
+                for k in api(group).raw:  #
+                    if k[0] in group_item_list:
+                        logging.debug(f'k[0] in group_item_list  {k[0]},{k[1]}')
+                    if k[0] == 'name':
+                        groupname=k[1]
+                    if k[0] == 'id':
+                        groupid=k[1]              
+                    if k[0] == 'group_members':
+                        groupdevs=k[1]['15002']['9003']
+                if groupname !='SuperGroup' and groupname !='':
+                    for dev_id in groupdevs :
+                        devdict ={}
+                        devdict['name'] = groupname #api(group).name  # is everything with api(.. calling the gateway?)
+                        devdict['groupid'] = groupid #api(group).id # is everything an api call?
+                        device_group_dict[repr(dev_id)] = devdict
+                time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW        
+            #pprint.pp(device_group_dict)
+      
         # device data
         #devices = api(devices_commands) #try:
         # TODO: test would this fail if devices changed.
         devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) 
-        
+        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW 
         #
-        logging.debug('** devices', devices)
+        logging.debug(f'** devices {devices}')
         
         logging.debug("*** START dev.raw")
         key_prefix = 'tradfri'
@@ -156,10 +193,18 @@ def main():
                     zabbix_send_result = send_zabbix_packet(za_device_send, zabbix_config)
                     if config['print_zabbix_send']:
                         logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+            #
+
             if True: #send_device_values:
                 ivlist=[] # send separately per device
                 devtype = app_type_dict[dev.application_type]['type'] #TODO: not used probably
-                logging.debug('****', type(dev.raw) , type(dev) )
+                #logging.debug(f'****', type(dev.raw) , type(dev) )
+                # group name
+                ivlist += [ZabbixMetric( tradfri_hostname,
+                           f'{key_begin}.group_name', device_group_dict[repr(dev.id)]['name'] , epoch_timestamp)]
+                # group id
+                ivlist += [ZabbixMetric( tradfri_hostname,
+                           f'{key_begin}.group_id', device_group_dict[repr(dev.id)]['groupid'] , epoch_timestamp)] 
                 for k in dev.raw: #device_item_list:
                     if list_all_items:
                         logging.debug( k )
@@ -176,7 +221,7 @@ def main():
                 if dev.light_control is not None:
                     for k in dev.light_control.raw[0]:
                         if list_all_items:
-                            logging.debug(k[0], k[1],type(k),)
+                            logging.debug(f'list_all_items.light_control {k[0]}, {k[1]},{type(k)}')
                         if k[0] in device_light_item_list and k[1] is not None:
                             ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.light_control.{k[0]}{key_end}',
@@ -199,10 +244,13 @@ def main():
         gateway_item_list = ['ota_update_state','firmware_version','first_setup',
                              'ota_type','update_progress']
         logging.debug('** gateway endpoint')
+        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW 
         gateway_data = api(gateway.get_gateway_info()).raw
         #pprint.pp(gateway_data)
         ivlist=[]
         for k in gateway_data:
+            if list_all_items:
+                logging.debug(k)
             if k[0] in gateway_item_list:
                 ivlist += [ZabbixMetric( config['monitored_hostname'],
                         f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
@@ -214,11 +262,12 @@ def main():
             if config['print_zabbix_send']:
                 logging.info('*** zabbix server returned:')
                 logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+        #
         epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
             break
         else:
             logging.info('sleeping')
-            time.sleep(60)
+            time.sleep(55)
     #end while
 main()
