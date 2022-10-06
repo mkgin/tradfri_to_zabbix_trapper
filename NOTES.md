@@ -93,3 +93,22 @@ TypeError: pytradfri.gateway.GatewayInfoResponse() argument after ** must be a m
 
 - Possibly to do with DHCP?
   - https://github.com/home-assistant-libs/pytradfri/issues/310
+  - Possible, but i didn't really see any correlation in DHCP logs 
+  - more likely to do with spamming/querying the GW at high rates.
+
+
+### While powering off GW
+
+```
+Oct 05 13:16:00 DEBUG:pyzabbix.sender:Response header: b'ZBXD\x01Z\x00\x00\x00\x00\x00\x00\x00'
+Oct 05 13:16:00 DEBUG:pyzabbix.sender:Data received: {'response': 'success', 'info': 'processed: 1; failed: 0; total: 1; seconds spent: 0.000057'}
+Oct 05 13:16:00 DEBUG:pyzabbix.sender:('z4p.private', 10051) response: {'response': 'success', 'info': 'processed: 1; failed: 0; total: 1; seconds spent: 0.000057'}
+Oct 05 13:16:00 DEBUG:root:Zabbix Sender succeeded
+Oct 05 13:16:00 {"processed": 1, "failed": 0, "total": 1, "time": "0.000057", "chunk": 1}
+Oct 05 13:16:00 Traceback (most recent call last):
+Oct 05 13:16:00   File "/home/username/git/pytradfri_zabbix/pytradfri_to_zabbix.py", line 273, in <module>
+Oct 05 13:16:00     main()
+Oct 05 13:16:00   File "/home/username/git/pytradfri_zabbix/pytradfri_to_zabbix.py", line 204, in main
+Oct 05 13:16:00     f'{key_begin}.group_name', device_group_dict[repr(dev.id)]['name'] , epoch_timestamp)]
+Oct 05 13:16:00 KeyError: '65583'
+```

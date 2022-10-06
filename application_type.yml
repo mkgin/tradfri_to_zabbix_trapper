@@ -9,6 +9,14 @@
 2:
   name: 'TRADFRI bulb'
   type: 'bulb'
+3:
+  name: 'TRADFRI outlet'
+  type: 'outlet'
 4:
   name: 'TRADFRI motion sensor'
   type: 'motion'
+#
+# 7: type: 'blind'
+# 10: type 'airpurifier
+# more info
+# https://github.com/vwout/vera-tradfri/blob/master/L_TradfriGW.lua#L51

@@ -50,8 +50,8 @@ zabbix_send_failed_time = 0
 
 def main():
     """main."""
-    logging.basicConfig(level=logging.INFO)
-    #logging.basicConfig(level=logging.DEBUG)
+    #logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     config = load_config()
     monitored_hostname=config['monitored_hostname']
     # variables for zabbix
@@ -82,10 +82,12 @@ def main():
                 "Maybe you need to add the 'Security Code' on the "
                 "back of your Tradfri gateway to own_config.yml"
             )
+
+    no_gateway_data_counter = 0
     first_loop = True
     epoch_timestamp_last = int(time.time())
-    sleep_between_api_calls = 2
-
+    sleep_between_api_calls = 0.5
+    
     # loop starts here
     while True: #breaks at end for single run    
         # do this less often
@@ -118,14 +120,13 @@ def main():
             """
             group_item_list = ['id','name','group_members']
             device_group_dict = {}
-            #time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
-            groups = api(gateway.get_groups())
-            time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
+            groups = api( gateway.get_groups())
             for group in groups:
                 groupname=''
                 groupid=''
                 groupdevs=''
-                for k in api(group).raw:  #
+                #for k in api(try_n_times( group, '', expected_exceptions=RequestTimeout).raw):  #
+                for k in api(group).raw:
                     if k[0] in group_item_list:
                         logging.debug(f'k[0] in group_item_list  {k[0]},{k[1]}')
                     if k[0] == 'name':
@@ -140,17 +141,11 @@ def main():
                         devdict['name'] = groupname #api(group).name  # is everything with api(.. calling the gateway?)
                         devdict['groupid'] = groupid #api(group).id # is everything an api call?
                         device_group_dict[repr(dev_id)] = devdict
-                time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW        
-            #pprint.pp(device_group_dict)
-      
         # device data
         #devices = api(devices_commands) #try:
         # TODO: test would this fail if devices changed.
         devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) 
-        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW 
-        #
         logging.debug(f'** devices {devices}')
-        
         logging.debug("*** START dev.raw")
         key_prefix = 'tradfri'
         device_item_list = ['name','ota_update_state',
@@ -183,7 +178,7 @@ def main():
             if device_discovery:
                 device_discovery_item = f'{dev.id}_{int (datetime.timestamp(dev.created_at))},' + \
                                          app_type_dict[dev.application_type]['type'] + \
-                                         f',{dev.name}\n'
+                                         f',{dev.name},' + device_group_dict[repr(dev.id)]['name'] +'\n'
                 za_device_send = [ZabbixMetric( config['monitored_hostname'],
                                     'tradfri.device.list',
                                     device_discovery_item , epoch_timestamp)] #int (datetime.timestamp(dev.created_at)))] #epoch_timestamp)]
@@ -244,24 +239,31 @@ def main():
         gateway_item_list = ['ota_update_state','firmware_version','first_setup',
                              'ota_type','update_progress']
         logging.debug('** gateway endpoint')
-        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW 
-        gateway_data = api(gateway.get_gateway_info()).raw
-        #pprint.pp(gateway_data)
-        ivlist=[]
-        for k in gateway_data:
-            if list_all_items:
-                logging.debug(k)
-            if k[0] in gateway_item_list:
-                ivlist += [ZabbixMetric( config['monitored_hostname'],
-                        f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
-        if config['print_zabbix_send']:
-            logging.info('*** zabbix ivlist [gateway]:')
-            pprint.pp(ivlist)     
-        if config['do_zabbix_send']:
-            zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
+        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
+        no_gateway_data_state = False
+        try:
+            gateway_data = api(gateway.get_gateway_info()).raw
+        except RequestTimeout:
+            no_gateway_data_state = True
+            no_gateway_data_counter += 1
+            logging.info('** Failed to run api(gateway.get_gateway_info()).raw ... maybe next time' +
+                         f'no_gateway_data_counter: {no_gateway_data_counter}')
+        if not no_gateway_data_state: # not critical if this isn't sent each iteration
+            ivlist=[]
+            for k in gateway_data:
+                if list_all_items:
+                    logging.debug(k)
+                if k[0] in gateway_item_list:
+                    ivlist += [ZabbixMetric( config['monitored_hostname'],
+                            f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
             if config['print_zabbix_send']:
-                logging.info('*** zabbix server returned:')
-                logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+                logging.info('*** zabbix ivlist [gateway]:')
+                pprint.pp(ivlist)     
+            if config['do_zabbix_send']:
+                zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
+                if config['print_zabbix_send']:
+                    logging.info('*** zabbix server returned:')
+                    logging.info(zabbix_send_result_string(zabbix_send_result[1]))
         #
         epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
