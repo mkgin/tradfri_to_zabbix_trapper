@@ -18,3 +18,4 @@ monitored_hostname: 'tradfri.local'
 print_zabbix_send: false
 do_zabbix_send: true
 do_it_once: false
+list_all_items: false

@@ -86,7 +86,7 @@ def main():
     no_gateway_data_counter = 0
     first_loop = True
     epoch_timestamp_last = int(time.time())
-    sleep_between_api_calls = 0.5
+    sleep_between_api_calls = 0.9
     
     # loop starts here
     while True: #breaks at end for single run    
@@ -154,7 +154,8 @@ def main():
         #
         # not interested yet 'air_purifier_control', blind_control,
         #light_control=None, signal_repeater_control, socket_control
-        device_light_item_list = ['state', 'dimmer','color_hex',]
+        device_light_item_list = ['state', 'dimmer','color_hex', 'color_mireds',
+                                  'color_xy_x', 'color_xy_y','color_hue', 'color_saturation' ]
         #light_control=[LightResponse(id=0, color_mireds=251, color_hex='f5faf6', color_xy_x=25022,
         #color_xy_y=24884, color_hue=None, color_saturation=None, dimmer=254, state=0)]
         # Some light may change brightness during the day, maybe nice to make
@@ -162,10 +163,10 @@ def main():
         device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
         # empty or less interesting
         # 'serial','manufacturer',
-        
+        device_socket_item_list = ['id','state']
         device_discovery = True #or False
         #device_discovery = False  #TODO: fix... debugging /testing
-        list_all_items = True     # TODO: fix... debugging /testing
+        #list_all_items = True     # moved to config
         #list_all_items = False
         device_discovery_list = ''
         for dev in devices:
@@ -201,26 +202,36 @@ def main():
                 ivlist += [ZabbixMetric( tradfri_hostname,
                            f'{key_begin}.group_id', device_group_dict[repr(dev.id)]['groupid'] , epoch_timestamp)] 
                 for k in dev.raw: #device_item_list:
-                    if list_all_items:
+                    if config['list_all_items']:
                         logging.debug( k )
                     if k[0] in device_item_list and k[1] is not None:
                         ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.{k[0]}{key_end}', k[1], epoch_timestamp)]
                 for k in dev.device_info.raw:
-                    if list_all_items:
+                    if config['list_all_items']:
                         logging.debug (k)
                     if k[0] in device_info_item_list and k[1] is not None:
                         ivlist += [ZabbixMetric( tradfri_hostname,
                                 f'{key_begin}.device_info.{k[0]}{key_end}',
                                 k[1],epoch_timestamp)]
+                #light_control
                 if dev.light_control is not None:
                     for k in dev.light_control.raw[0]:
-                        if list_all_items:
+                        if config['list_all_items']:
                             logging.debug(f'list_all_items.light_control {k[0]}, {k[1]},{type(k)}')
                         if k[0] in device_light_item_list and k[1] is not None:
                             ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.light_control.{k[0]}{key_end}',
-                                    k[1],epoch_timestamp)]            
+                                    k[1],epoch_timestamp)]
+                #socket_control
+                if dev.socket_control is not None:
+                    for k in dev.socket_control.raw[0]:
+                        if config['list_all_items']:
+                            logging.debug(f'list_all_items.socket_control {k[0]}, {k[1]},{type(k)}')
+                        if k[0] in device_socket_item_list and k[1] is not None:
+                            ivlist += [ZabbixMetric( tradfri_hostname,
+                                    f'{key_begin}.socket_control.{k[0]}{key_end}',
+                                    k[1],epoch_timestamp)]
                 if config['print_zabbix_send']:
                     logging.info('*** zabbix ivlist:')
                     pprint.pp(ivlist)
@@ -251,7 +262,7 @@ def main():
         if not no_gateway_data_state: # not critical if this isn't sent each iteration
             ivlist=[]
             for k in gateway_data:
-                if list_all_items:
+                if config['list_all_items']:
                     logging.debug(k)
                 if k[0] in gateway_item_list:
                     ivlist += [ZabbixMetric( config['monitored_hostname'],
