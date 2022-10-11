@@ -15,13 +15,7 @@
 
 ### Zabbix Templates
 
-* Template_Tradfri_Devices.xml 
-  * this template is for discovered devices
-  
-* Template_Tradfri_Gateway.xml
-  * contains device discovery rule
-  * device list (used to discover new devices)
-  * items to monitor from the gateway
+See the [Zabbix Templates directory](Zabbix_Templates/)
 
 ## modules used
 
@@ -33,10 +27,16 @@
 * api_polling (as submodule ) 
   * Use ```git clone --recurse-submodules``` to clone this repo and the api_polling submodule
 
+## Recent changes
+- gateway items
+- get groups, put group name into devices data/inventory
+- slow down polling the gateway
+- poll lights, outlets and devices undergoing ota update regularly
+- poll other items less often, first run + every quarter hour.
+
+
 ## Todo:
 
 - use my api polling module for sending stategies, polling intervals
-- gateway items
-- get groups, put group name into devices data/inventory
-- zabbix template (Devices done, Gateway TODO)
+- update zabbix templates
 - test making a new PSK from Gateway secret
