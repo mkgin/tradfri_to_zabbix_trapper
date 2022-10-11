@@ -31,10 +31,10 @@ from api_poll_tools import *
 CONFIG_FILE = "tradfri_standalone_psk.conf"
 
 # Count data recieved from zabbix server
-zabbix_server_processed = 0 #
-zabbix_server_failed = 0    # Zabbix server did not accept (wrong key, wrong type of data)
-zabbix_server_total = 0     #
-zabbix_send_failed_time = 0
+#zabbix_server_processed = 0 #
+#zabbix_server_failed = 0    # Zabbix server did not accept (wrong key, wrong type of data)
+#zabbix_server_total = 0     #
+#zabbix_send_failed_time = 0
 
 def main():
     """main."""
@@ -96,6 +96,7 @@ def main():
     no_gateway_data_counter = 0
     first_loop = True
     epoch_timestamp_last = int(time.time())
+    epoch_timestamp_start = epoch_timestamp_last
     # main loop starts here
     while True: #breaks at end for single run
         epoch_timestamp = int(time.time())
@@ -132,19 +133,25 @@ def main():
             #"""
             group_item_list = ['id','name','group_members']
             device_group_dict = {}
-            #time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
             logging.debug('gateway.get_groups()')
-            groups = api( gateway.get_groups())
+            # TODO: get this to work with try_n_times...
+            # gateway.get_groups() is a method not a function so  more complicated to handle
+            groups = api( gateway.get_groups()) #get command list for groups
+            time.sleep(sleep_short_between_api_calls) # try sleeping between api calls to GW
             logging.debug(f'groups: {groups}')
             for group in groups:
                 logging.debug(f'group: {group}')
                 groupname=''
                 groupid=''
                 groupdevs=''
-                #for k in api(try_n_times( group, '', expected_exceptions=RequestTimeout).raw):  #
-                time.sleep(sleep_short_between_api_calls) # try sleeping between api calls to GW
                 logging.debug('api(group).raw')
-                for k in api(group).raw:
+                api_group_result = try_n_times( api, group,
+                                         expected_exceptions=(RequestTimeout ),
+                                         try_slowly_seconds=sleep_short_between_api_calls)
+                logging.debug(f'api_group_result: type {type(api_group_result)}\n{api_group_result}')
+                logging.debug(f'api_group_result.raw: type {type(api_group_result.raw)}\n{api_group_result.raw}')
+                #for k in api(group).raw:
+                for k in api_group_result.raw:
                     if k[0] in group_item_list:
                         logging.debug(f'k[0] in group_item_list  {k[0]},{k[1]}')
                     if k[0] == 'name':
@@ -177,9 +184,8 @@ def main():
         for devcount in range( 0, len(devices_commands) ): #- 1):
             print(f'devcount: {devcount}')
             dev = try_n_times( api,devices_commands[devcount],
-                               expected_exceptions=(RequestTimeout, TypeError ),
+                               expected_exceptions=(RequestTimeout ),
                                try_slowly_seconds=sleep_short_between_api_calls)
-
             key_begin = f'{key_prefix}.device' #+ '.' + app_type_dict[dev.application_type]['type']
             #key_end = f'[{dev.id}_{int (datetime.timestamp(dev.created_at))}]'
             key_end = ''
@@ -189,8 +195,8 @@ def main():
             if device_discovery:
                 device_discovery_item = f'{dev.id}_{int (datetime.timestamp(dev.created_at))},' + \
                                          app_type_dict[dev.application_type]['type'] + \
-                                         f',{dev.name},' + device_group_dict[repr(dev.id)]['name'] + \
-                                         ',' + repr(device_group_dict[repr(dev.id)]['groupid']) +'\n'
+                                         f',{dev.name},' + device_group_dict[repr(dev.id)]['name']+\
+                                         ',' + repr(device_group_dict[repr(dev.id)]['groupid'])+'\n'
                 za_device_send = [ZabbixMetric( config['monitored_hostname'],
                                     'tradfri.device.list',
                                     device_discovery_item , epoch_timestamp)]
@@ -204,7 +210,6 @@ def main():
                             logging.info(zabbix_send_result_string(zabbix_send_result[1]))
                         else:
                             logging.error('** send_zabbix_packet failed')
-
             if True: #send_device_values:
                 ivlist=[] # send separately per device
                 # group name
@@ -307,6 +312,8 @@ def main():
         epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
             break
+        uptime = epoch_timestamp_start - int(time.time())
+        logging.info(f'uptime: {uptime} seconds.')
         # calculate sleep
         iteration_time= int(time.time()) - epoch_timestamp
         sleep_time = polling_interval - iteration_time
