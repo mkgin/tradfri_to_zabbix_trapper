@@ -27,13 +27,21 @@ See the [Zabbix Templates directory](Zabbix_Templates/)
 * api_polling (as submodule ) 
   * Use ```git clone --recurse-submodules``` to clone this repo and the api_polling submodule
 
+## Trådfri Gateway
+
+* The Gateway crashes occasionally
+  * https://github.com/home-assistant-libs/pytradfri#known-issues
+
+* Trying to poll less frequently and not poll too many commands at once.
+  * adjusting intervals between api requests
+  * eventually may need to set up a watchdog to power cycle the gateway.
+
 ## Recent changes
 - gateway items
 - get groups, put group name into devices data/inventory
 - slow down polling the gateway
 - poll lights, outlets and devices undergoing ota update regularly
 - poll other items less often, first run + every quarter hour.
-
 
 ## Todo:
 

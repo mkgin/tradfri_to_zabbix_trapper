@@ -36,7 +36,6 @@ zabbix_server_failed = 0    # Zabbix server did not accept (wrong key, wrong typ
 zabbix_server_total = 0     #
 zabbix_send_failed_time = 0
 
-
 def main():
     """main."""
     key_prefix = 'tradfri'
@@ -64,12 +63,16 @@ def main():
     monitored_hostname=config['monitored_hostname']
     # variables for zabbix
     zabbix_config=config['zabbix_sender_settings']
+    # api polling throttling
+    sleep_between_api_calls = config['delay_api_calls_large']
+    sleep_short_between_api_calls = config['delay_api_calls_small']
+    # api polling intervals
+    polling_interval = config['frequent_poll_interval']
+    occasional_poll_minutes = config['occasional_poll_minutes']
     # load last used psk
     tradfri_gw_psk = load_json(CONFIG_FILE)
-
     # load dict for application_type
     app_type_dict = yaml.safe_load(open('application_type.yml'))
-
     # load the the tradfri config, check we are have credentials to connect
     try:
         identity = tradfri_gw_psk[monitored_hostname].get("identity")
@@ -90,60 +93,57 @@ def main():
                 "Maybe you need to add the 'Security Code' on the "
                 "back of your Tradfri gateway to own_config.yml"
             )
-
     no_gateway_data_counter = 0
     first_loop = True
     epoch_timestamp_last = int(time.time())
-    sleep_between_api_calls = 0.8
-    #sleep_short_between_api_calls = 0.35
-    sleep_short_between_api_calls = 0.4
-
-    # loop starts here
+    # main loop starts here
     while True: #breaks at end for single run
-        # do this less often
         epoch_timestamp = int(time.time())
         api = api_factory.request
         gateway = Gateway()
+        # occasional_loop says when to collect data (commands) for devices we want to
+        # monitor frequently
         occasional_loop = False
-        #occasional_loop says when to collect data (commands) for devices we want to
-        #monitor frequently
-
         # first_time and occasionally run
-        if first_loop or test_times_straddle_minute(epoch_timestamp_last, epoch_timestamp ,[0,15,30,45]):
+        if first_loop or test_times_straddle_minute(epoch_timestamp_last, epoch_timestamp
+                                                    ,occasional_poll_minutes):
             logging.info(f'Checking Devices {epoch_timestamp} first_loop: {first_loop}')
             first_loop = False
             occasional_loop = True
             # get device endpoints
             devices_command_all = gateway.get_devices() #try
             time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
-
             logging.debug(f'** devices_command_all: {devices_command_all}')
-
             if config['gateway_detailed_debug']:
                 print( f'devices_command_all: type{devices_command_all}')
                 pprint.pp(devices_command_all)
-
             #devices_commands = api(devices_command) #try:
-            devices_commands_all = try_n_times( api, devices_command_all,expected_exceptions=RequestTimeout )
+            devices_commands_all = \
+                try_n_times( api, devices_command_all,expected_exceptions=RequestTimeout)
             time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
             logging.debug(f'** devices_commands_all {devices_commands_all}')
             if config['gateway_detailed_debug']:
                 print( f'devices_commands_all: type{devices_commands_all}')
                 pprint.pp(devices_commands_all)
-
             # Create dictionary for device group names and ids
-            """ get group name  or id from a device with this dictionary
-                eg: device_group_dict['65582']['name']
-                    device_group_dict['65582']['groupid'])
-            """
+            #""" get group name  or id from a device with this dictionary
+            #    eg: device_group_dict['65582']['name']
+            #        device_group_dict['65582']['groupid'])
+            #"""
             group_item_list = ['id','name','group_members']
             device_group_dict = {}
+            #time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
+            logging.debug('gateway.get_groups()')
             groups = api( gateway.get_groups())
+            logging.debug(f'groups: {groups}')
             for group in groups:
+                logging.debug(f'group: {group}')
                 groupname=''
                 groupid=''
                 groupdevs=''
                 #for k in api(try_n_times( group, '', expected_exceptions=RequestTimeout).raw):  #
+                time.sleep(sleep_short_between_api_calls) # try sleeping between api calls to GW
+                logging.debug('api(group).raw')
                 for k in api(group).raw:
                     if k[0] in group_item_list:
                         logging.debug(f'k[0] in group_item_list  {k[0]},{k[1]}')
@@ -153,7 +153,7 @@ def main():
                         groupid=k[1]
                     if k[0] == 'group_members':
                         groupdevs=k[1]['15002']['9003']
-                if groupname !='SuperGroup' and groupname !='':
+                if groupname not in ('SuperGroup', ''):
                     for dev_id in groupdevs :
                         devdict ={}
                         devdict['name'] = groupname #api(group).name
@@ -176,7 +176,6 @@ def main():
         #for dev in devices:
         for devcount in range( 0, len(devices_commands) ): #- 1):
             print(f'devcount: {devcount}')
-            #time.sleep(sleep_short_between_api_calls)
             dev = try_n_times( api,devices_commands[devcount],
                                expected_exceptions=(RequestTimeout, TypeError ),
                                try_slowly_seconds=sleep_short_between_api_calls)
@@ -194,7 +193,7 @@ def main():
                                          ',' + repr(device_group_dict[repr(dev.id)]['groupid']) +'\n'
                 za_device_send = [ZabbixMetric( config['monitored_hostname'],
                                     'tradfri.device.list',
-                                    device_discovery_item , epoch_timestamp)] #int (datetime.timestamp(dev.created_at)))] #epoch_timestamp)]
+                                    device_discovery_item , epoch_timestamp)]
                 if config['print_zabbix_send']:
                     logging.info( f'za_device_send {za_device_send}')
                 if config['do_zabbix_send']:
@@ -282,7 +281,7 @@ def main():
         except RequestTimeout:
             no_gateway_data_state = True
             no_gateway_data_counter += 1
-            logging.info('** Failed to run api(gateway.get_gateway_info()).raw ... maybe next time' +
+            logging.info('** Failed to run api(gateway.get_gateway_info()).raw ..maybe next time' +
                          f'no_gateway_data_counter: {no_gateway_data_counter}')
         if not no_gateway_data_state: # not critical if this isn't sent each iteration
             ivlist=[]
@@ -308,7 +307,12 @@ def main():
         epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
             break
-        logging.info('sleeping')
-        time.sleep(55)
+        # calculate sleep
+        iteration_time= int(time.time()) - epoch_timestamp
+        sleep_time = polling_interval - iteration_time
+        logging.info(f'This iteration took {iteration_time} seconds.')
+        if sleep_time > 0:
+            logging.info(f'Sleeping for {sleep_time} seconds.')
+            time.sleep(sleep_time)
     #end while
 main()

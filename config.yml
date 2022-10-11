@@ -14,6 +14,18 @@ zabbix_sender_settings: 'use_config=True'
 # needs to be same as 'Host name' configured in Zabbix front end
 monitored_hostname: 'tradfri.local'
 
+
+# Polling interval in seconds
+frequent_poll_interval: 60
+# minutes of the hour to occasionally polled items
+occasional_poll_minutes: [0,15,30,45]
+
+# API call throttling. sleep intervals between calls in seconds
+# Use for gateways that may crash if polled agressively
+# See: https://github.com/home-assistant-libs/pytradfri#known-issues
+delay_api_calls_large: 0.8
+delay_api_calls_small: 0.4
+
 # testing / debugging variables
 print_zabbix_send: false
 do_zabbix_send: true
