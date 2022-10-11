@@ -6,38 +6,27 @@ sends it to a Zabbix(r)? server.
 
 Used example_sync.py form the pytradfri-library as a starting point.
 """
-import socket #for errors from ZabbixSender
-import logging #ZabbixSender
-from pyzabbix import ZabbixMetric, ZabbixSender, ZabbixResponse
-
-
-import os
+import pprint
+import time
+import uuid
+#import socket #for errors from ZabbixSender
+import logging
+#import os
 from datetime import datetime
-
-# Hack to allow relative import above top level package
-# from example_sync.py... probably not needed?
-# ( two lined after 'import sys' )
 import sys
-folder = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath("%s/.." % folder))
+import yaml
+from pyzabbix import ZabbixMetric
+#from pyzabbix import ZabbixMetric, ZabbixSender, ZabbixResponse
+from pytradfri import Gateway
+from pytradfri.api.libcoap_api import APIFactory
+from pytradfri.error import PytradfriError,RequestTimeout
+from pytradfri.util import load_json, save_json
 
 #own libs
 sys.path.append('api_polling')
 from api_poll_config import *
 from api_poll_zabbix import *
 from api_poll_tools import *
-
-import json
-import time
-import uuid
-import yaml
-
-from pytradfri import Gateway
-from pytradfri.api.libcoap_api import APIFactory
-from pytradfri.error import PytradfriError,RequestTimeout
-from pytradfri.util import load_json, save_json
-
-import pprint
 
 CONFIG_FILE = "tradfri_standalone_psk.conf"
 
@@ -50,6 +39,25 @@ zabbix_send_failed_time = 0
 
 def main():
     """main."""
+    key_prefix = 'tradfri'
+    device_item_list = ['name','ota_update_state',
+                   'application_type', 'last_seen', 'reachable']
+    # 'id' and 'created_at' are used to create a unique id
+    #
+    # not interested yet 'air_purifier_control', blind_control,
+    #light_control=None, signal_repeater_control, socket_control
+    device_light_item_list = ['state', 'dimmer','color_hex', 'color_mireds',
+                              'color_xy_x', 'color_xy_y','color_hue', 'color_saturation' ]
+    #light_control=[LightResponse(id=0, color_mireds=251, color_hex='f5faf6', color_xy_x=25022,
+    #color_xy_y=24884, color_hue=None, color_saturation=None, dimmer=254, state=0)]
+    # Some light may change brightness during the day, maybe nice to make
+    # template graphs that use dimmer * state
+    device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
+    # empty or less interesting
+    # 'serial','manufacturer',
+    device_socket_item_list = ['id','state']
+    device_discovery = True #or False
+
     #logging.basicConfig(level=logging.INFO)
     logging.basicConfig(level=logging.DEBUG)
     config = load_config()
@@ -86,32 +94,42 @@ def main():
     no_gateway_data_counter = 0
     first_loop = True
     epoch_timestamp_last = int(time.time())
-    sleep_between_api_calls = 0.9
-    
+    sleep_between_api_calls = 0.8
+    #sleep_short_between_api_calls = 0.35
+    sleep_short_between_api_calls = 0.4
+
     # loop starts here
-    while True: #breaks at end for single run    
+    while True: #breaks at end for single run
         # do this less often
         epoch_timestamp = int(time.time())
         api = api_factory.request
         gateway = Gateway()
-        time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
+        occasional_loop = False
+        #occasional_loop says when to collect data (commands) for devices we want to
+        #monitor frequently
 
-        # first_time  and occasionally run 
+        # first_time and occasionally run
         if first_loop or test_times_straddle_minute(epoch_timestamp_last, epoch_timestamp ,[0,15,30,45]):
             logging.info(f'Checking Devices {epoch_timestamp} first_loop: {first_loop}')
             first_loop = False
-            
+            occasional_loop = True
             # get device endpoints
-            devices_command = gateway.get_devices() #try
+            devices_command_all = gateway.get_devices() #try
             time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
 
-            logging.debug(f'** devices_command: { devices_command}')
+            logging.debug(f'** devices_command_all: {devices_command_all}')
+
+            if config['gateway_detailed_debug']:
+                print( f'devices_command_all: type{devices_command_all}')
+                pprint.pp(devices_command_all)
 
             #devices_commands = api(devices_command) #try:
-            devices_commands = try_n_times( api, devices_command,expected_exceptions=RequestTimeout )
+            devices_commands_all = try_n_times( api, devices_command_all,expected_exceptions=RequestTimeout )
             time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
-            # try sleeping
-            logging.debug(f'** devices_commands { devices_commands}')
+            logging.debug(f'** devices_commands_all {devices_commands_all}')
+            if config['gateway_detailed_debug']:
+                print( f'devices_commands_all: type{devices_commands_all}')
+                pprint.pp(devices_commands_all)
 
             # Create dictionary for device group names and ids
             """ get group name  or id from a device with this dictionary
@@ -132,44 +150,37 @@ def main():
                     if k[0] == 'name':
                         groupname=k[1]
                     if k[0] == 'id':
-                        groupid=k[1]              
+                        groupid=k[1]
                     if k[0] == 'group_members':
                         groupdevs=k[1]['15002']['9003']
                 if groupname !='SuperGroup' and groupname !='':
                     for dev_id in groupdevs :
                         devdict ={}
-                        devdict['name'] = groupname #api(group).name  # is everything with api(.. calling the gateway?)
-                        devdict['groupid'] = groupid #api(group).id # is everything an api call?
+                        devdict['name'] = groupname #api(group).name
+                        devdict['groupid'] = groupid #api(group).id
                         device_group_dict[repr(dev_id)] = devdict
-        # device data
-        #devices = api(devices_commands) #try:
-        # TODO: test would this fail if devices changed.
-        devices = try_n_times( api,devices_commands,expected_exceptions=RequestTimeout ) 
-        logging.debug(f'** devices {devices}')
-        logging.debug("*** START dev.raw")
-        key_prefix = 'tradfri'
-        device_item_list = ['name','ota_update_state',
-                       'application_type', 'last_seen', 'reachable']
-        # 'id' and 'created_at' are used to create a unique id
+        logging.debug("*** START Polling devices for loop: occasional_loop: {occasional_loop}")
+        # set devices to monitor here, if we are in an "occasional_loop" we monitor all.
+        # and update the list of regularly monitored devices, otherwise, loop through
+        # the list of regularly_monitored devices.
         #
-        # not interested yet 'air_purifier_control', blind_control,
-        #light_control=None, signal_repeater_control, socket_control
-        device_light_item_list = ['state', 'dimmer','color_hex', 'color_mireds',
-                                  'color_xy_x', 'color_xy_y','color_hue', 'color_saturation' ]
-        #light_control=[LightResponse(id=0, color_mireds=251, color_hex='f5faf6', color_xy_x=25022,
-        #color_xy_y=24884, color_hue=None, color_saturation=None, dimmer=254, state=0)]
-        # Some light may change brightness during the day, maybe nice to make
-        # template graphs that use dimmer * state
-        device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
-        # empty or less interesting
-        # 'serial','manufacturer',
-        device_socket_item_list = ['id','state']
-        device_discovery = True #or False
-        #device_discovery = False  #TODO: fix... debugging /testing
-        #list_all_items = True     # moved to config
-        #list_all_items = False
-        device_discovery_list = ''
-        for dev in devices:
+        # regularly monitored devices are:
+        # - lights
+        # - outlets
+        # - any device with a ota_update status of 1
+        if occasional_loop:
+            devices_commands = devices_commands_all
+            devices_commands_frequent = []
+        else:
+            devices_commands = devices_commands_frequent
+        #for dev in devices:
+        for devcount in range( 0, len(devices_commands) ): #- 1):
+            print(f'devcount: {devcount}')
+            #time.sleep(sleep_short_between_api_calls)
+            dev = try_n_times( api,devices_commands[devcount],
+                               expected_exceptions=(RequestTimeout, TypeError ),
+                               try_slowly_seconds=sleep_short_between_api_calls)
+
             key_begin = f'{key_prefix}.device' #+ '.' + app_type_dict[dev.application_type]['type']
             #key_end = f'[{dev.id}_{int (datetime.timestamp(dev.created_at))}]'
             key_end = ''
@@ -179,7 +190,8 @@ def main():
             if device_discovery:
                 device_discovery_item = f'{dev.id}_{int (datetime.timestamp(dev.created_at))},' + \
                                          app_type_dict[dev.application_type]['type'] + \
-                                         f',{dev.name},' + device_group_dict[repr(dev.id)]['name'] +'\n'
+                                         f',{dev.name},' + device_group_dict[repr(dev.id)]['name'] + \
+                                         ',' + repr(device_group_dict[repr(dev.id)]['groupid']) +'\n'
                 za_device_send = [ZabbixMetric( config['monitored_hostname'],
                                     'tradfri.device.list',
                                     device_discovery_item , epoch_timestamp)] #int (datetime.timestamp(dev.created_at)))] #epoch_timestamp)]
@@ -188,25 +200,31 @@ def main():
                 if config['do_zabbix_send']:
                     zabbix_send_result = send_zabbix_packet(za_device_send, zabbix_config)
                     if config['print_zabbix_send']:
-                        logging.info(zabbix_send_result_string(zabbix_send_result[1]))
-            #
+                        if zabbix_send_result[0]:
+                            logging.info('*** zabbix server returned:')
+                            logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+                        else:
+                            logging.error('** send_zabbix_packet failed')
 
             if True: #send_device_values:
                 ivlist=[] # send separately per device
-                devtype = app_type_dict[dev.application_type]['type'] #TODO: not used probably
-                #logging.debug(f'****', type(dev.raw) , type(dev) )
                 # group name
                 ivlist += [ZabbixMetric( tradfri_hostname,
-                           f'{key_begin}.group_name', device_group_dict[repr(dev.id)]['name'] , epoch_timestamp)]
+                            f'{key_begin}.group_name',
+                            device_group_dict[repr(dev.id)]['name'] , epoch_timestamp)]
                 # group id
                 ivlist += [ZabbixMetric( tradfri_hostname,
-                           f'{key_begin}.group_id', device_group_dict[repr(dev.id)]['groupid'] , epoch_timestamp)] 
+                           f'{key_begin}.group_id',
+                           device_group_dict[repr(dev.id)]['groupid'] , epoch_timestamp)]
                 for k in dev.raw: #device_item_list:
                     if config['list_all_items']:
                         logging.debug( k )
                     if k[0] in device_item_list and k[1] is not None:
                         ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.{k[0]}{key_end}', k[1], epoch_timestamp)]
+                    if k[0] == 'ota_update_state' and occasional_loop:
+                        if k[1] != 0 and dev.light_control is None and dev.socket_control is None:
+                            devices_commands_frequent += [devices_commands[devcount]]
                 for k in dev.device_info.raw:
                     if config['list_all_items']:
                         logging.debug (k)
@@ -216,6 +234,8 @@ def main():
                                 k[1],epoch_timestamp)]
                 #light_control
                 if dev.light_control is not None:
+                    if occasional_loop: #add to frequent
+                        devices_commands_frequent += [devices_commands[devcount]]
                     for k in dev.light_control.raw[0]:
                         if config['list_all_items']:
                             logging.debug(f'list_all_items.light_control {k[0]}, {k[1]},{type(k)}')
@@ -225,6 +245,8 @@ def main():
                                     k[1],epoch_timestamp)]
                 #socket_control
                 if dev.socket_control is not None:
+                    if occasional_loop:
+                        devices_commands_frequent += [devices_commands[devcount]]
                     for k in dev.socket_control.raw[0]:
                         if config['list_all_items']:
                             logging.debug(f'list_all_items.socket_control {k[0]}, {k[1]},{type(k)}')
@@ -232,23 +254,26 @@ def main():
                             ivlist += [ZabbixMetric( tradfri_hostname,
                                     f'{key_begin}.socket_control.{k[0]}{key_end}',
                                     k[1],epoch_timestamp)]
+                #send to zabbix
                 if config['print_zabbix_send']:
                     logging.info('*** zabbix ivlist:')
                     pprint.pp(ivlist)
                 if config['do_zabbix_send']:
                     zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
                     if config['print_zabbix_send']:
-                        logging.info('*** zabbix server returned:')
-                        logging.info(zabbix_send_result_string(zabbix_send_result[1]))
-        logging.debug("*** END dev.raw")
-
-        # TODO: check if devices are in a group.
-        # put group names to inventory
-        # use group in visible name
-
+                        if zabbix_send_result[0]:
+                            logging.info('*** zabbix server returned:')
+                            logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+                        else:
+                            logging.error('** send_zabbix_packet failed')
+        logging.debug("*** END Polling devices for loop")
+        # check devices_commands_frequent for duplicates
+        if config['gateway_detailed_debug'] and occasional_loop:
+            print('devices_commands_frequent')
+            pprint.pp(devices_commands_frequent)
         logging.debug('** gateway info')
         gateway_item_list = ['ota_update_state','firmware_version','first_setup',
-                             'ota_type','update_progress']
+                             'ota_type','update_progress', 'commissioning_mode']
         logging.debug('** gateway endpoint')
         time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
         no_gateway_data_state = False
@@ -263,24 +288,27 @@ def main():
             ivlist=[]
             for k in gateway_data:
                 if config['list_all_items']:
-                    logging.debug(k)
+                    logging.info(f'list_all_items: gateway: {k}')
                 if k[0] in gateway_item_list:
                     ivlist += [ZabbixMetric( config['monitored_hostname'],
                             f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
             if config['print_zabbix_send']:
                 logging.info('*** zabbix ivlist [gateway]:')
-                pprint.pp(ivlist)     
+                pprint.pp(ivlist)
             if config['do_zabbix_send']:
                 zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config)
                 if config['print_zabbix_send']:
-                    logging.info('*** zabbix server returned:')
-                    logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+                    if config['print_zabbix_send']:
+                        if zabbix_send_result[0]:
+                            logging.info('*** zabbix server returned:')
+                            logging.info(zabbix_send_result_string(zabbix_send_result[1]))
+                        else:
+                            logging.error('** send_zabbix_packet failed')
         #
         epoch_timestamp_last = epoch_timestamp
         if config['do_it_once']:
             break
-        else:
-            logging.info('sleeping')
-            time.sleep(55)
+        logging.info('sleeping')
+        time.sleep(55)
     #end while
 main()
