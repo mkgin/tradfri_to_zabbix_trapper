@@ -310,9 +310,11 @@ def main():
                             logging.error('** send_zabbix_packet failed')
         #
         epoch_timestamp_last = epoch_timestamp
+        logging.info(f'try_slowly.expected_exception_count: {try_slowly.expected_exception_count}, '
+                  f'try_slowly.unexpected_exception_count: {try_slowly.unexpected_exception_count}')
         if config['do_it_once']:
             break
-        uptime = epoch_timestamp_start - int(time.time())
+        uptime = int(time.time()) - epoch_timestamp_start
         logging.info(f'uptime: {uptime} seconds.')
         # calculate sleep
         iteration_time= int(time.time()) - epoch_timestamp
