@@ -28,7 +28,7 @@ from api_poll_config import *
 from api_poll_zabbix import *
 from api_poll_tools import *
 
-CONFIG_FILE = "tradfri_standalone_psk.conf"
+#CONFIG_FILE = "tradfri_standalone_psk.conf"
 
 # Count data recieved from zabbix server
 #zabbix_server_processed = 0 #
@@ -41,21 +41,18 @@ def main():
     key_prefix = 'tradfri'
     device_item_list = ['name','ota_update_state',
                    'application_type', 'last_seen', 'reachable']
+
+
     # 'id' and 'created_at' are used to create a unique id
-    #
-    # not interested yet 'air_purifier_control', blind_control,
-    #light_control=None, signal_repeater_control, socket_control
+    # not interested yet 'air_purifier_control', blind_control, signal_repeater_control
     device_light_item_list = ['state', 'dimmer','color_hex', 'color_mireds',
                               'color_xy_x', 'color_xy_y','color_hue', 'color_saturation' ]
-    #light_control=[LightResponse(id=0, color_mireds=251, color_hex='f5faf6', color_xy_x=25022,
-    #color_xy_y=24884, color_hue=None, color_saturation=None, dimmer=254, state=0)]
-    # Some light may change brightness during the day, maybe nice to make
-    # template graphs that use dimmer * state
     device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
-    # empty or less interesting
-    # 'serial','manufacturer',
     device_socket_item_list = ['id','state']
     device_discovery = True #or False
+
+    gateway_expected_exceptions = (RequestTimeout, TypeError ) #a Tuple... leave last comma ( x, )
+    #maybe have a list for exceptions for restarting the gateway.
 
     #logging.basicConfig(level=logging.INFO)
     logging.basicConfig(level=logging.DEBUG)
@@ -70,7 +67,7 @@ def main():
     polling_interval = config['frequent_poll_interval']
     occasional_poll_minutes = config['occasional_poll_minutes']
     # load last used psk
-    tradfri_gw_psk = load_json(CONFIG_FILE)
+    tradfri_gw_psk = load_json(config['tradfri_standalone_psk_conf'])
     # load dict for application_type
     app_type_dict = yaml.safe_load(open('application_type.yml'))
     # load the the tradfri config, check we are have credentials to connect
@@ -87,7 +84,7 @@ def main():
             print("Generated PSK: ", psk)
 
             tradfri_gw_psk[args.host] = {"identity": identity, "key": psk}
-            save_json(CONFIG_FILE, tradfri_gw_psk)
+            save_json(config['tradfri_standalone_psk_conf'], tradfri_gw_psk)
         except AttributeError:
             raise PytradfriError(
                 "Maybe you need to add the 'Security Code' on the "
@@ -120,7 +117,7 @@ def main():
                 pprint.pp(devices_command_all)
             #devices_commands = api(devices_command) #try:
             devices_commands_all = \
-                try_n_times( api, devices_command_all,expected_exceptions=RequestTimeout)
+                try_n_times( api, devices_command_all,expected_exceptions= gateway_expected_exceptions)
             time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
             logging.debug(f'** devices_commands_all {devices_commands_all}')
             if config['gateway_detailed_debug']:
@@ -134,9 +131,7 @@ def main():
             group_item_list = ['id','name','group_members']
             device_group_dict = {}
             logging.debug('gateway.get_groups()')
-            # TODO: get this to work with try_n_times...
-            # gateway.get_groups() is a method not a function so  more complicated to handle
-            groups = api( gateway.get_groups()) #get command list for groups
+            groups = api( gateway.get_groups()) #get command list for groups #TODO: try!!
             time.sleep(sleep_short_between_api_calls) # try sleeping between api calls to GW
             logging.debug(f'groups: {groups}')
             for group in groups:
@@ -146,7 +141,7 @@ def main():
                 groupdevs=''
                 logging.debug('api(group).raw')
                 api_group_result = try_n_times( api, group,
-                                         expected_exceptions=(RequestTimeout ),
+                                         expected_exceptions=( gateway_expected_exceptions ),
                                          try_slowly_seconds=sleep_short_between_api_calls)
                 logging.debug(f'api_group_result: type {type(api_group_result)}\n{api_group_result}')
                 logging.debug(f'api_group_result.raw: type {type(api_group_result.raw)}\n{api_group_result.raw}')
@@ -184,7 +179,7 @@ def main():
         for devcount in range( 0, len(devices_commands) ): #- 1):
             print(f'devcount: {devcount}')
             dev = try_n_times( api,devices_commands[devcount],
-                               expected_exceptions=(RequestTimeout ),
+                               expected_exceptions=( gateway_expected_exceptions ),
                                try_slowly_seconds=sleep_short_between_api_calls)
             key_begin = f'{key_prefix}.device' #+ '.' + app_type_dict[dev.application_type]['type']
             #key_end = f'[{dev.id}_{int (datetime.timestamp(dev.created_at))}]'
@@ -210,7 +205,7 @@ def main():
                             logging.info(zabbix_send_result_string(zabbix_send_result[1]))
                         else:
                             logging.error('** send_zabbix_packet failed')
-            if True: #send_device_values:
+            if True: # send_device_values:
                 ivlist=[] # send separately per device
                 # group name
                 ivlist += [ZabbixMetric( tradfri_hostname,
@@ -280,15 +275,27 @@ def main():
                              'ota_type','update_progress', 'commissioning_mode']
         logging.debug('** gateway endpoint')
         time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
+        
         no_gateway_data_state = False
-        try:
-            gateway_data = api(gateway.get_gateway_info()).raw
-        except RequestTimeout:
-            no_gateway_data_state = True
-            no_gateway_data_counter += 1
-            logging.info('** Failed to run api(gateway.get_gateway_info()).raw ..maybe next time' +
-                         f'no_gateway_data_counter: {no_gateway_data_counter}')
-        if not no_gateway_data_state: # not critical if this isn't sent each iteration
+
+        #
+        gateway_info_command = gateway.get_gateway_info()
+        gateway_data_result = try_n_times( api, gateway_info_command ,
+                                         expected_exceptions=( gateway_expected_exceptions ),
+                                         try_slowly_seconds=sleep_short_between_api_calls)
+        #gateway_data = api(gateway_data_result).raw
+        logging.debug(f'** get gateway data: try_n_times.success: {try_n_times.success}')
+        gateway_data = gateway_data_result.raw
+##        try:
+##            gateway_data = api(gateway.get_gateway_info()).raw
+##            #gateway_data = api(gateway_data_result).raw
+##        except  gateway_expected_exceptions:
+##            no_gateway_data_state = True
+##            no_gateway_data_counter += 1
+##            logging.info('** Failed to run api(gateway.get_gateway_info()).raw ..maybe next time' +
+##                         f'no_gateway_data_counter: {no_gateway_data_counter}')
+        #if not no_gateway_data_state: # not critical if this isn't sent each iteration
+        if try_n_times.success: # not critical if this isn't sent each iteration
             ivlist=[]
             for k in gateway_data:
                 if config['list_all_items']:

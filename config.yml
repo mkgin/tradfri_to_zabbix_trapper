@@ -1,8 +1,8 @@
 # security code on the back of the Tradfri
 # Used to generate psk (pre-shared key) for authentication
 tradfri_security_code: '123abc456DEF789ghi'
-# locactions of the psk
-tradfri_standalone_psk_conf: 'tradfri_standalone_psk.conf' #not used/implemented yet
+# locations of the psk file
+tradfri_standalone_psk_conf: 'tradfri_standalone_psk.conf' 
 
 # use zabbix config from host /etc/zabbix/zabbix_agentd.conf (ServerActive=...)
 # zabbix-server need to allow zabbix trap connections)

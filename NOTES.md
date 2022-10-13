@@ -97,6 +97,32 @@ TypeError: pytradfri.gateway.GatewayInfoResponse() argument after ** must be a m
   - more likely to do with spamming/querying the GW at high rates.
 
 
+```
+1665623375.972598 DEBUG:root:Zabbix Sender succeeded
+1665623375.972640 {"processed": 11, "failed": 1, "total": 12, "time": "0.000501", "chunk": 1}
+1665623375.972675 DEBUG:root:*** END Polling devices for loop
+1665623375.972696 DEBUG:root:** gateway info
+1665623375.972717 DEBUG:root:** gateway endpoint
+1665623376.573468 DEBUG:pytradfri.api.libcoap_api:Executing tradfri.private get ['15011', '15012']
+1665623376.632636 DEBUG:pytradfri.api.libcoap_api:Received: 
+1665623376.632947 Traceback (most recent call last):
+1665623376.633000   File "/home/user1/git/pytradfri_zabbix/pytradfri_to_zabbix.py", line 327, in <module>
+1665623376.633243     main()
+1665623376.633284   File "/home/user1/git/pytradfri_zabbix/pytradfri_to_zabbix.py", line 285, in main
+1665623376.633320     gateway_data = api(gateway.get_gateway_info()).raw
+1665623376.633339   File "/home/user1/.local/lib/python3.9/site-packages/pytradfri/api/libcoap_api.py", line 126, in request
+1665623376.633370     return self._execute(api_commands, timeout=timeout)
+1665623376.633394   File "/home/user1/.local/lib/python3.9/site-packages/pytradfri/api/libcoap_api.py", line 106, in _execute
+1665623376.633479     api_command.process_result(_process_output(return_value, parse_json))
+1665623376.633522   File "/home/user1/.local/lib/python3.9/site-packages/pytradfri/command.py", line 62, in process_result
+1665623376.633545     self._result = self._process_result(result)
+1665623376.633564   File "/home/user1/.local/lib/python3.9/site-packages/pytradfri/gateway.py", line 193, in process_result
+1665623376.633663     return GatewayInfo(result)
+1665623376.633706   File "/home/user1/.local/lib/python3.9/site-packages/pytradfri/gateway.py", line 297, in __init__
+1665623376.633729     self.raw = GatewayInfoResponse(**raw)
+1665623376.633749 TypeError: pytradfri.gateway.GatewayInfoResponse() argument after ** must be a mapping, not NoneType
+```
+
 ### While powering off GW
 
 ```
