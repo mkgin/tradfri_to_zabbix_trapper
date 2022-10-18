@@ -21,6 +21,28 @@
 Same PSK in ```tradfri_standalone_psk.conf``` works after rebooting GW
 
 ## Crashes
+### Potential Causes and cures.
+
+Have seen many things mentioned...
+
+* Spamming / Polling too often and not being 'close' on the network
+  * https://github.com/home-assistant-libs/pytradfri#known-issues
+  * I have tried polling at different rates and spacing out times between API calls, and often manage 9 hours or more without the gateway needing to be reatarted
+* Number of devices 
+  * reddit? github?
+* DHCP
+  * https://github.com/home-assistant-libs/pytradfri/issues/310
+  * I haven't noticed any correlation after going through logs
+* Access to webhook.logentries.com
+  * https://www.reddit.com/r/tradfri/comments/gl80in/why_does_the_tradfri_hub_need_to_talk_to/
+  * check app settings
+* Power supply
+  * https://www.reddit.com/r/tradfri/comments/qq4yyn/gateway_stuck_in_an_infinite_reboot_cycle/
+  * This makes sense, I am still using the original Ikea one.
+  * Switched to a different power source (computer USB port), maybe a shorter USB cable.
+  
+  
+### Dumps
 
 Probably need to add "try:" to calls that make requests to the API, and should aim to reduce the number of calls made.
 
