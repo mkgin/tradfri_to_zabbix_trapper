@@ -371,6 +371,7 @@ def main():
         logging.info('gateway_restarted ' +
                      repr(count_timestamps_in_interval(restart_gateway_timestamp_list, interval=86400))
                      + ' times in last 24 hours / or since restart')
+        logging.debug(f'restart_gateway_timestamp_list: {restart_gateway_timestamp_list}')
         if config['do_it_once']:
             break
         uptime = int(time.time()) - epoch_timestamp_start
