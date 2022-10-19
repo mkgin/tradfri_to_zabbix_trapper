@@ -26,6 +26,18 @@ occasional_poll_minutes: [0,15,30,45]
 delay_api_calls_large: 0.8
 delay_api_calls_small: 0.4
 
+#  gateway restart settings, used by restart_gateway() function
+relay_host: 'https://esp8266.local' # start of URL of host that can control power to the gateway
+relay_on_path: 'relay_ON'        # path to turn a relay on (interupt power to gateway)
+relay_off_path: 'relay_OFF'      # path to turn a relay off (power on to gateway)
+relay_on_time: 1 # seconds to keep gateway power off
+gateway_restart_enabled: false
+gateway_restart_time: 80 # seconds to wait before trying to connect to gateway after restart
+gateway_restart_min_interval: 300 # seconds to wait before trying to restart again
+gateway_restart_fail_interval: 3600 # fail if ...fail_count exceeded in this interval
+gateway_restart_fail_count: 3 # count for above gateway_restart_fail_interval
+
+
 # testing / debugging variables
 do_zabbix_send: true
 do_it_once: false

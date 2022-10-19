@@ -21,15 +21,68 @@ from pytradfri import Gateway
 from pytradfri.api.libcoap_api import APIFactory
 from pytradfri.error import PytradfriError,RequestTimeout
 from pytradfri.util import load_json, save_json
-
+# for restarting gateway
+import urllib.request
+import ssl
 #own libs
 sys.path.append('api_polling')
 from api_poll_config import *
 from api_poll_zabbix import *
 from api_poll_tools import *
 
+restart_gateway_count = 0
+restart_gateway_timestamp_list = []
+
+def restart_gateway():
+    """
+    This will depend on your setup.
+    I have a esp-01 and relay board. Power to the gateway is through the NC (normally closed)
+    contact and common so the power cycling is accomplished by turning relay on for a few seconds then off.
+
+    
+    """
+    config = load_config()
+    if not config['gateway_restart_enabled']:
+        logging.error('** gateway_restart_enabled: False')
+        logging.error('** gateway is not responding to requests. Quitting...')
+        raise
+    global restart_gateway_count, restart_gateway_timestamp_list
+    # do not restart if  last restart < config['gateway_restart_min_interval']
+    if count_timestamps_in_interval(restart_gateway_timestamp_list,
+                                    interval=config['gateway_restart_min_interval']) > 0:
+        logging.info('already restarted within last ' + repr(config['gateway_restart_min_interval']) +' s')
+        logging.info('sleeping for ' + repr(config['gateway_restart_time']/5) + ' s before trying again')
+        time.sleep(config['gateway_restart_time']/5)
+    if count_timestamps_in_interval(restart_gateway_timestamp_list,
+                                    interval=config['gateway_restart_fail_interval'])\
+                                    > config['gateway_restart_fail_count']:
+       logging.error('** gateway_restart over ' + repr(interval=config['gateway_restart_fail_count']) +
+                     ' times in last ' + config['gateway_restart_fail_interval'] + ' s')
+       raise
+    restart_gateway_count += 1
+    restart_gateway_timestamp_list += [int(time.time())]
+    # TODO: error handling
+    # don't check the host certificate if using SSL/TLS
+    ssl._create_default_https_context = ssl._create_unverified_context
+    
+    relay_on = config['relay_host'] + '/' + config['relay_on_path']
+    relay_off = config['relay_host'] + '/' + config['relay_off_path']
+    logging.warning('restarting the gateway')
+    for url in relay_on, relay_off:
+        logging.info(f'fetching url...')
+        with urllib.request.urlopen(url) as response:
+            bodyhtml = response.read()
+            response_code = response.getcode()
+        logging.warning(f'response_code: {response_code}\n{bodyhtml}' )
+        time.sleep(config['relay_on_time'])
+    logging.warning('sleeping for ' + repr(config['gateway_restart_time']) +' s so gateway has time to come up')
+    time.sleep(config['gateway_restart_time'])
+    logging.info('done sleeping, resuming polling the gateway.')
+
+
 def main():
     """main."""
+    global restart_gateway_count, restart_gateway_timestamp_list
     key_prefix = 'tradfri'
     device_item_list = ['name','ota_update_state',
                    'application_type', 'last_seen', 'reachable']
@@ -37,10 +90,10 @@ def main():
     # 'id' and 'created_at' are used to create a unique id
     # not interested yet 'air_purifier_control', blind_control, signal_repeater_control
     device_light_item_list = ['state', 'dimmer','color_hex', 'color_mireds',
-                              'color_xy_x', 'color_xy_y','color_hue', 'color_saturation' ]
+                              'color_xy_x', 'color_xy_y','color_hue', 'color_saturation']
     device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
     device_socket_item_list = ['id','state']
-    device_discovery = True #or False
+    device_discovery = True # or False
 
     gateway_expected_exceptions = (RequestTimeout, TypeError ) #a Tuple... leave last comma ( x, )
     #maybe have a list for exceptions for restarting the gateway.
@@ -81,15 +134,22 @@ def main():
                 "Maybe you need to add the 'Security Code' on the "
                 "back of your Tradfri gateway to own_config.yml"
             )
-    no_gateway_data_counter = 0 #counter for data not recieved from gateway
+    no_gateway_data_counter = 0 # counter for data not recieved from gateway
     first_loop = True
     epoch_timestamp_last = int(time.time())
     epoch_timestamp_start = epoch_timestamp_last
+    api = api_factory.request
+    gateway = Gateway()
+    gateway_restart = False
     # main loop starts here
-    while True: #breaks at end for single run
+    while True: # breaks at end for single run
+        # this is the best place to restart the gateway if needed
+        if gateway_restart:
+            restart_gateway()
+            first_loop = True
+            gateway_restart = False
+            # TODO: Might want to test connecting and wait a bit if failing
         epoch_timestamp = int(time.time())
-        api = api_factory.request
-        gateway = Gateway()
         # occasional_loop says when to collect data (commands) for devices we want to
         # monitor frequently
         occasional_loop = False
@@ -101,18 +161,22 @@ def main():
             occasional_loop = True
             # get device commands
             devices_command_all = gateway.get_devices()
-            #time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
             logging.debug(f'** devices_command_all: {devices_command_all}')
-            #if config['gateway_detailed_debug']:
-            #    print( f'devices_command_all: type{devices_command_all}')
-            #    pprint.pp(devices_command_all)
-            #devices_commands = api(devices_command) #try:
-            devices_commands_all = \
-                try_n_times( api, devices_command_all,expected_exceptions = gateway_expected_exceptions)
-            time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
+            try:
+                devices_commands_all = \
+                    try_n_times(api, devices_command_all,expected_exceptions = gateway_expected_exceptions)
+            except TooManyRetries:
+                logging.warning(f'** get devices_commands failed')
+                gateway_restart = True
+                continue
+            # time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
             logging.debug(f'** devices_commands_all {devices_commands_all}')
+            # TODO: Test API call suceeded
+            # if try_n_times.success:
+            # else reset gateway and "continue" (new while loop, as first_loop when its up
+                
             if config['gateway_detailed_debug']:
-                print( f'devices_commands_all: type{devices_commands_all}')
+                print(f'devices_commands_all: type{devices_commands_all}')
                 pprint.pp(devices_commands_all)
             # Create dictionary for device group names and ids
             #""" get group name  or id from a device with this dictionary
@@ -122,15 +186,25 @@ def main():
             group_item_list = ['id','name','group_members']
             device_group_dict = {}
             logging.debug('gateway.get_groups()')
-            groups = api( gateway.get_groups()) #get command list for groups #TODO: try!!
-            time.sleep(sleep_short_between_api_calls) # try sleeping between api calls to GW
-            logging.debug(f'groups: {groups}')
+            try:
+                groups = api(gateway.get_groups())   # get  groups api call
+                logging.debug(f'groups: {groups}')
+            except:
+                logging.debug(f'get_groups failed {groups}')
+                raise ## TODO:FIXME!! checking if we fail here often 
             for group in groups:
                 logging.debug(f'for groups in group: {group}, api(group)')
                 groupname = groupid = groupdevs = ''
-                api_group_result = try_n_times( api, group,
-                                         expected_exceptions=( gateway_expected_exceptions ),
-                                         try_slowly_seconds=sleep_short_between_api_calls)
+                try:
+                    api_group_result = try_n_times(api, group,
+                                                   expected_exceptions=( gateway_expected_exceptions ),
+                                                   try_slowly_seconds=sleep_short_between_api_calls)
+                except TooManyRetries:
+                    logging.warning(f'** get group failed')
+                    gateway_restart = True
+                    break
+                # TODO: Test API call suceeded
+                # if try_n_times.success:
                 logging.debug(f'api_group_result: type {type(api_group_result)}\n{api_group_result}')
                 logging.debug(f'api_group_result.raw: type {type(api_group_result.raw)}\n{api_group_result.raw}')
                 for k in api_group_result.raw:
@@ -148,7 +222,9 @@ def main():
                         devdict['name'] = groupname #api(group).name
                         devdict['groupid'] = groupid #api(group).id
                         device_group_dict[repr(dev_id)] = devdict
-        ## End of if first_loop
+        if gateway_restart:
+            continue
+        ## End of if 'first_loop'/occasional_loop
         logging.debug("*** START Polling devices for loop: occasional_loop: {occasional_loop}")
         # set devices to monitor here, in 'devices_commands'
         # if we are in an "occasional_loop" we monitor all.
@@ -166,10 +242,19 @@ def main():
             devices_commands = devices_commands_frequent
         # device data for loop
         for devcount in range( 0, len(devices_commands) ):
+            if gateway_restart:
+                break
             print(f'devcount: {devcount}')
-            dev = try_n_times( api,devices_commands[devcount],
-                               expected_exceptions=( gateway_expected_exceptions ),
-                               try_slowly_seconds=sleep_short_between_api_calls)
+            try:
+                dev = try_n_times( api,devices_commands[devcount],
+                                   expected_exceptions=( gateway_expected_exceptions ),
+                                   try_slowly_seconds=sleep_short_between_api_calls)
+            except TooManyRetries:
+                logging.warning(f'** get device_command failed for {devices_commands[devcount]}')
+                gateway_restart = True
+                break
+            # TODO: Test API call suceeded
+            # if try_n_times.success:
             key_begin = f'{key_prefix}.device'
             key_end = ''
             tradfri_hostname = f'{dev.id}_{int (datetime.timestamp(dev.created_at))}.' + \
@@ -237,6 +322,8 @@ def main():
                 zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config, do_send=config['do_zabbix_send'] )
                 log_zabbix_send_result(zabbix_send_result)
         logging.debug("*** END Polling devices for loop")
+        if gateway_restart:
+            continue
         # devices_commands_frequent should not have duplicates
         if config['gateway_detailed_debug'] and occasional_loop:
             print('devices_commands_frequent')
@@ -249,13 +336,17 @@ def main():
         no_gateway_data_state = False
         #
         gateway_info_command = gateway.get_gateway_info()
-        gateway_data_result = try_n_times( api, gateway_info_command ,
-                                         expected_exceptions=( gateway_expected_exceptions ),
-                                         try_slowly_seconds=sleep_short_between_api_calls)
+        try:
+            gateway_data_result = try_n_times( api, gateway_info_command ,
+                                   expected_exceptions=( gateway_expected_exceptions ),
+                                   try_slowly_seconds=sleep_short_between_api_calls)
+        except TooManyRetries:
+            logging.warning(f'** get gateway info command failed')
         #gateway_data = api(gateway_data_result).raw
         logging.debug(f'** get gateway data: try_n_times.success: {try_n_times.success}')
         gateway_data = gateway_data_result.raw
-        ## if not no_gateway_data_state: # not critical if this isn't sent each iteration
+        # not critical if this isn't sent each iteration, it will fail next time if the
+        # gateway needs to be restarted
         if try_n_times.success: # not critical if this isn't sent each iteration
             ivlist=[]
             for k in gateway_data:
@@ -271,8 +362,15 @@ def main():
         # TODO: restarting the gateway via a relay.
         # 
         epoch_timestamp_last = epoch_timestamp
-        logging.info(f'try_slowly.expected_exception_count: {try_slowly.expected_exception_count}, '
-                  f'try_slowly.unexpected_exception_count: {try_slowly.unexpected_exception_count}')
+        logging.info(f'try_slowly.expected_exception_count: {try_slowly.expected_exception_count}')
+        logging.info(f'try_slowly.unexpected_exception_count: {try_slowly.unexpected_exception_count}')
+        logging.info(f'restart_gateway_count: {restart_gateway_count}')
+        logging.info('gateway_restarted ' +
+                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list, interval=3600))
+                     + ' times in last hour')
+        logging.info('gateway_restarted ' +
+                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list, interval=86400))
+                     + ' times in last 24 hours / or since restart')
         if config['do_it_once']:
             break
         uptime = int(time.time()) - epoch_timestamp_start

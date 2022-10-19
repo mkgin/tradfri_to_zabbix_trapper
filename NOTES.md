@@ -160,3 +160,9 @@ Oct 05 13:16:00   File "/home/username/git/pytradfri_zabbix/pytradfri_to_zabbix.
 Oct 05 13:16:00     f'{key_begin}.group_name', device_group_dict[repr(dev.id)]['name'] , epoch_timestamp)]
 Oct 05 13:16:00 KeyError: '65583'
 ```
+
+## Links
+
+* Gateway Teardown
+  * https://www.ifixit.com/Teardown/Ikea+TR%C3%85DFRI+Gateway+Teardown/85936
+* https://trmm.net/Ikea/#gateway
