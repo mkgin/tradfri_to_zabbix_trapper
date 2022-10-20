@@ -14,6 +14,10 @@ import logging
 #import os
 from datetime import datetime
 import sys
+# for restarting gateway
+import urllib.request
+import ssl
+# for config
 import yaml
 from pyzabbix import ZabbixMetric
 #from pyzabbix import ZabbixMetric, ZabbixSender, ZabbixResponse
@@ -21,9 +25,6 @@ from pytradfri import Gateway
 from pytradfri.api.libcoap_api import APIFactory
 from pytradfri.error import PytradfriError,RequestTimeout
 from pytradfri.util import load_json, save_json
-# for restarting gateway
-import urllib.request
-import ssl
 #own libs
 sys.path.append('api_polling')
 from api_poll_config import *
@@ -35,12 +36,12 @@ restart_gateway_timestamp_list = []
 
 def restart_gateway():
     """
-    This will depend on your setup.
-    I have a esp-01 and relay board. Power to the gateway is through the NC (normally closed)
-    contact and common so the power cycling is accomplished by turning relay on for a few seconds then off.
+    This will depend on your setup. I use a esp-01 and relay board.
+    Power to the gateway is through the NC (normally closed) contact and common so power cycling
+    is accomplished by turning relay on for a second then off.
 
     Don't restart if last restart was within config['gateway_restart_min_interval']
-    quit if gateway_restart_fail_count exceeded in gateway_restart_fail_interval
+    quit if gateway_restart_fail_count_exceeds exceeded in gateway_restart_fail_interval
     """
     global restart_gateway_count, restart_gateway_timestamp_list
     # don't check the host certificate if using SSL/TLS
@@ -57,35 +58,48 @@ def restart_gateway():
     # do not restart if  last restart < config['gateway_restart_min_interval']
     if count_timestamps_in_interval(restart_gateway_timestamp_list,
                                     interval=config['gateway_restart_min_interval']) > 0:
-        logging.info('already restarted within last ' + repr(config['gateway_restart_min_interval']) +' s')
-        logging.info('sleeping for ' + repr(config['gateway_restart_time']/5) + ' s before trying again')
+        logging.info('already restarted within last ' +
+                     repr(config['gateway_restart_min_interval']) +' s')
+        logging.info('sleeping for ' + repr(config['gateway_restart_time']/5) +
+                     ' s before trying again')
         relay_urls = [relay_off] # just make sure relay is off
         sleep_time_factor = 0.2 # sleep less if not resetting
         # tell zabbix we are not restarting
         za_device_send = [ZabbixMetric( config['monitored_hostname'], za_key_start + 'restart',
                                     'min_interval_no_restart' )]
-        zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'], do_send=config['do_zabbix_send'])        
+        zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'],
+                                                do_send=config['do_zabbix_send'])
     else:
         restart_gateway_count += 1
         restart_gateway_timestamp_list += [int(time.time())]
-        relay_urls = [relay_on, relay_off]
-        # tell zabbix we are restarting
-        za_device_send = [ZabbixMetric( config['monitored_hostname'], za_key_start + 'restart',
-                                    'restarting' )]
-        zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'], do_send=config['do_zabbix_send'] )
-
-    # quit if gateway_restart_fail_count exceeded in gateway_restart_fail_interval
-    if count_timestamps_in_interval(restart_gateway_timestamp_list,
-                                    interval=config['gateway_restart_fail_interval'])\
-                                    > config['gateway_restart_fail_count']:
-       logging.error('** gateway_restart over ' + repr(interval=config['gateway_restart_fail_count']) +
-                     ' times in last ' + config['gateway_restart_fail_interval'] + ' s')
-       # tell zabbix we are not quitting
-       za_device_send = [ZabbixMetric( config['monitored_hostname'], za_key_start + 'restart',
-                                   'fail_count_in_interval_exceeded' )]
-       zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'], do_send=config['do_zabbix_send']) 
-       raise
-    logging.warning('restarting the gateway')
+        # quit if gateway_restart_fail_count_exceeds exceeded in gateway_restart_fail_interval
+        logging.debug('restart_gateway: config gateway_restart_fail_interval: ' +
+                      repr(config['gateway_restart_fail_interval']))
+        logging.debug('restart_gateway: config gateway_restart_fail_count_exceeds: ' +
+                      repr(config['gateway_restart_fail_count_exceeds']))
+        logging.debug('restart_gateway: count_timestamps ' +
+                      repr(count_timestamps_in_interval(restart_gateway_timestamp_list,
+                      interval=config['gateway_restart_fail_interval'])))
+        if count_timestamps_in_interval(restart_gateway_timestamp_list,
+                                        interval=config['gateway_restart_fail_interval'])\
+                                        > config['gateway_restart_fail_count_exceeds']:
+            logging.error('** gateway_restart over ' +
+                         repr(config['gateway_restart_fail_count_exceeds']) + ' times in last ' +
+                         repr(config['gateway_restart_fail_interval']) + ' s')
+            # tell zabbix we are quitting
+            za_device_send = [ZabbixMetric( config['monitored_hostname'], za_key_start + 'restart',
+                                       'fail_count_in_interval_exceeded' )]
+            zabbix_send_result = send_zabbix_packet(za_device_send,config['zabbix_sender_settings'],
+                                                   do_send=config['do_zabbix_send'])
+            raise
+        else:
+            relay_urls = [relay_on, relay_off]
+            # tell zabbix we are restarting
+            za_device_send = [ZabbixMetric( config['monitored_hostname'], za_key_start + 'restart',
+                                        'restarting' )]
+            zabbix_send_result = send_zabbix_packet(za_device_send,config['zabbix_sender_settings'],
+                                                    do_send=config['do_zabbix_send'] )
+            logging.warning('restarting the gateway')
     # TODO: error handling in case response != 200, timeout, etc.
     for url in relay_urls:
         logging.info(f'fetching url...')
@@ -96,11 +110,12 @@ def restart_gateway():
         # just keep these in the Gateway host template.
         za_device_send = [ZabbixMetric(config['monitored_hostname'], za_key_start + 'relay',
                                    f'{response_code},{bodyhtml}' )]
-        zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'], do_send=config['do_zabbix_send'])    
+        zabbix_send_result = send_zabbix_packet(za_device_send, config['zabbix_sender_settings'],
+                                                do_send=config['do_zabbix_send'])
         logging.warning(f'response_code: {response_code}\n{bodyhtml}' )
         time.sleep(config['relay_on_time'])
     logging.info('sleeping for ' + repr(config['gateway_restart_time'] * sleep_time_factor) +
-                 ' s so gateway has time to come up')
+                 ' s so gateway has time to come up after restart')
     time.sleep(config['gateway_restart_time'] * sleep_time_factor)
     logging.info('done sleeping, resuming polling the gateway.')
 
@@ -117,10 +132,8 @@ def main():
     device_info_item_list = [ 'firmware_version', 'power_source', 'battery_level','model_number' ]
     device_socket_item_list = ['id','state']
     device_discovery = True # or False
-
-    gateway_expected_exceptions = (RequestTimeout, TypeError ) #a Tuple... leave last comma ( x, )
-    #maybe have a list for exceptions for restarting the gateway.
-
+    # a Tuple... leave last comma ( x, ) if just one item
+    gateway_expected_exceptions = (RequestTimeout, TypeError )
     #logging.basicConfig(level=logging.INFO)
     logging.basicConfig(level=logging.DEBUG)
     config = load_config()
@@ -158,7 +171,7 @@ def main():
                 "Maybe you need to add the 'Security Code' on the "
                 "back of your Tradfri gateway to own_config.yml"
             )
-    no_gateway_data_counter = 0 # counter for data not recieved from gateway
+    #no_gateway_data_counter = 0 # counter for data not recieved from gateway
     first_loop = True
     epoch_timestamp_last = int(time.time())
     epoch_timestamp_start = epoch_timestamp_last
@@ -188,9 +201,10 @@ def main():
             logging.debug(f'** devices_command_all: {devices_command_all}')
             try:
                 devices_commands_all = \
-                    try_n_times(api, devices_command_all,expected_exceptions = gateway_expected_exceptions)
+                    try_n_times(api, devices_command_all,expected_exceptions =
+                                gateway_expected_exceptions)
             except TooManyRetries:
-                logging.warning(f'** get devices_commands failed')
+                logging.warning('** get devices_commands failed')
                 gateway_restart = True
                 continue
             # time.sleep(sleep_between_api_calls) # try sleeping between api calls to GW
@@ -198,7 +212,7 @@ def main():
             # TODO: Test API call suceeded
             # if try_n_times.success:
             # else reset gateway and "continue" (new while loop, as first_loop when its up
-                
+
             if config['gateway_detailed_debug']:
                 print(f'devices_commands_all: type{devices_commands_all}')
                 pprint.pp(devices_commands_all)
@@ -215,16 +229,16 @@ def main():
                 logging.debug(f'groups: {groups}')
             except:
                 logging.debug(f'get_groups failed {groups}')
-                raise ## TODO:FIXME!! checking if we fail here often 
+                raise ## TODO:FIXME!! checking if we fail here often
             for group in groups:
                 logging.debug(f'for groups in group: {group}, api(group)')
                 groupname = groupid = groupdevs = ''
                 try:
                     api_group_result = try_n_times(api, group,
-                                                   expected_exceptions=( gateway_expected_exceptions ),
-                                                   try_slowly_seconds=sleep_short_between_api_calls)
+                                            expected_exceptions=( gateway_expected_exceptions ),
+                                            try_slowly_seconds=sleep_short_between_api_calls)
                 except TooManyRetries:
-                    logging.warning(f'** get group failed')
+                    logging.warning('** get group failed')
                     gateway_restart = True
                     break
                 # TODO: Test API call suceeded
@@ -256,7 +270,7 @@ def main():
         # the list of regularly_monitored devices.
         #
         # regularly monitored devices are:
-        # - lights 
+        # - lights
         # - outlets
         # - any device with a ota_update status of 1
         if occasional_loop:
@@ -277,8 +291,6 @@ def main():
                 logging.warning(f'** get device_command failed for {devices_commands[devcount]}')
                 gateway_restart = True
                 break
-            # TODO: Test API call suceeded
-            # if try_n_times.success:
             key_begin = f'{key_prefix}.device'
             key_end = ''
             tradfri_hostname = f'{dev.id}_{int (datetime.timestamp(dev.created_at))}.' + \
@@ -292,7 +304,8 @@ def main():
                 za_device_send = [ZabbixMetric( config['monitored_hostname'],
                                     'tradfri.device.list',
                                     device_discovery_item , epoch_timestamp)]
-                zabbix_send_result = send_zabbix_packet(za_device_send, zabbix_config, do_send=config['do_zabbix_send'] )
+                zabbix_send_result = send_zabbix_packet(za_device_send, zabbix_config,
+                                                        do_send=config['do_zabbix_send'] )
                 log_zabbix_send_result(zabbix_send_result)
             if True: # send_device_values:
                 ivlist = []  # send separately per device
@@ -343,7 +356,8 @@ def main():
                                     f'{key_begin}.socket_control.{k[0]}{key_end}',
                                     k[1],epoch_timestamp)]
                 #send to zabbix
-                zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config, do_send=config['do_zabbix_send'] )
+                zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config,
+                                                        do_send=config['do_zabbix_send'] )
                 log_zabbix_send_result(zabbix_send_result)
         logging.debug("*** END Polling devices for loop")
         if gateway_restart:
@@ -357,7 +371,7 @@ def main():
                              'ota_type','update_progress', 'commissioning_mode']
         logging.debug('** gateway endpoint')
         time.sleep(sleep_between_api_calls)# try sleeping between api calls to GW
-        no_gateway_data_state = False
+        #no_gateway_data_state = False
         #
         gateway_info_command = gateway.get_gateway_info()
         try:
@@ -379,26 +393,26 @@ def main():
                 if k[0] in gateway_item_list:
                     ivlist += [ZabbixMetric( config['monitored_hostname'],
                             f'{key_prefix}.gateway.{k[0]}', k[1], epoch_timestamp)]
-            zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config, do_send=config['do_zabbix_send'] )
+            zabbix_send_result = send_zabbix_packet(ivlist, zabbix_config,
+                                                    do_send=config['do_zabbix_send'] )
             log_zabbix_send_result(zabbix_send_result)
-        #
         # TODO: send uptime and debug/failure info to zabbix, exception counts.
-        # TODO: restarting the gateway via a relay.
-        # 
         epoch_timestamp_last = epoch_timestamp
         logging.info(f'try_slowly.expected_exception_count: {try_slowly.expected_exception_count}')
         logging.info(f'try_slowly.unexpected_exception_count: {try_slowly.unexpected_exception_count}')
         logging.info(f'restart_gateway_count: {restart_gateway_count}')
         logging.info('gateway_restarted ' +
-                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list, interval=3600))
+                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list,
+                                                       interval=3600))
                      + ' times in last hour')
         uptime = int(time.time()) - epoch_timestamp_start
         if uptime < 86400:
-            log_string = ' since start'
+            log_string = 'since start'
         else:
-            log_string = ' in the last 24 hours'
+            log_string = 'in the last 24 hours'
         logging.info('gateway_restarted ' +
-                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list, interval=86400))
+                     repr(count_timestamps_in_interval(restart_gateway_timestamp_list,
+                                                       interval=86400))
                      + f' times {log_string}')
         logging.debug(f'restart_gateway_timestamp_list: {restart_gateway_timestamp_list}')
         if config['do_it_once']:

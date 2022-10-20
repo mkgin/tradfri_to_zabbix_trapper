@@ -44,7 +44,7 @@ gateway_restart_enabled: false
 gateway_restart_time: 80 # seconds to wait before trying to connect to gateway after restart
 gateway_restart_min_interval: 300 # seconds to wait before trying to restart again
 gateway_restart_fail_interval: 3600 # fail if ...fail_count exceeded in this interval
-gateway_restart_fail_count: 3 # count for above gateway_restart_fail_interval
+gateway_restart_fail_count_exceeds: 3 # count for above gateway_restart_fail_interval
 
 ## DEBUG AND TESTING RELATED
 #
