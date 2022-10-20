@@ -1,31 +1,40 @@
+## GATEWAY SPECIFIC
+#
 # security code on the back of the Tradfri
 # Used to generate psk (pre-shared key) for authentication
 tradfri_security_code: '123abc456DEF789ghi'
 # locations of the psk file
 tradfri_standalone_psk_conf: 'tradfri_standalone_psk.conf' 
+# host name or IP# of the tradfri gateway.
+# needs to be same as 'Host name' configured in Zabbix front
+# for the Tradfri gateway host.
+monitored_hostname: 'tradfri.local'
 
+## ZABBIX SERVER
+#
 # use zabbix config from host /etc/zabbix/zabbix_agentd.conf (ServerActive=...)
 # zabbix-server need to allow zabbix trap connections)
 zabbix_sender_settings: 'use_config=True'
 #ZabbixSender('use_config=True')
 #ZabbixSender('hostname')
 #ZabbixSender('IP ADDRESS')
+# Key prefix for Zabbix items.
+key_prefix: 'tradfri' ## don't change unless you make appropriate changes in the templates
 
-# needs to be same as 'Host name' configured in Zabbix front end
-monitored_hostname: 'tradfri.local'
-
-
+## API POLL INTERVALS AND DELAYS
+#
 # Polling interval in seconds
 frequent_poll_interval: 60
 # minutes of the hour to occasionally polled items
 occasional_poll_minutes: [0,15,30,45]
-
 # API call throttling. sleep intervals between calls in seconds
 # Use for gateways that may crash if polled agressively
 # See: https://github.com/home-assistant-libs/pytradfri#known-issues
 delay_api_calls_large: 0.8
 delay_api_calls_small: 0.4
 
+## GATEWAY RESTARTING
+#
 #  gateway restart settings, used by restart_gateway() function
 relay_host: 'https://esp8266.local' # start of URL of host that can control power to the gateway
 relay_on_path: 'relay_ON'        # path to turn a relay on (interupt power to gateway)
@@ -37,7 +46,8 @@ gateway_restart_min_interval: 300 # seconds to wait before trying to restart aga
 gateway_restart_fail_interval: 3600 # fail if ...fail_count exceeded in this interval
 gateway_restart_fail_count: 3 # count for above gateway_restart_fail_interval
 
-
+## DEBUG AND TESTING RELATED
+#
 # testing / debugging variables
 do_zabbix_send: true
 do_it_once: false
